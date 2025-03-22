@@ -2,6 +2,105 @@
 
 Este documento detalha o plano de refatoração para resolver os problemas identificados na análise do código do projeto MCP-CLI-ARCEE, seguindo as regras definidas em `.cursorrules`.
 
+## Plano de Refatoração
+
+### Visão Geral
+Este documento descreve o plano para refatoração do código-fonte do projeto MCP-CLI-ARCEE, organizando as tarefas em clusters e sub-clusters para facilitar a implementação.
+
+### Clusters
+
+#### Cluster 1: Arquitetura e Design (Complexidade: Alta)
+Foco em reestruturar a arquitetura do sistema para facilitar manutenção e extensão.
+
+##### Sub-Cluster 1.1: Extração de Classes Básicas (Complexidade: Baixa) ✅
+**Justificativa**: Classes simples com responsabilidades bem definidas e sem dependências complexas.
+
+**Abordagem**: 
+- Criar pasta `src/chat` ✅
+- Implementar classes ChatHistory e ChatUI ✅
+- Criar testes unitários simples para validação
+
+**Tarefas Concluídas**:
+- ✅ Criar pasta `src/chat`
+- ✅ Implementar classe `ChatHistory` em `src/chat/chat_history.py`
+- ✅ Implementar classe `ChatUI` em `src/chat/chat_ui.py`
+- ✅ Criar arquivo `__init__.py` para exportar as classes
+
+##### Sub-Cluster 1.2: Processamento de Comandos (Complexidade: Média) 🔄
+**Justificativa**: Envolve lógica mais complexa e integração com Airtable.
+
+**Abordagem**:
+- Criar classe CommandProcessor em `src/chat/command_processor.py` ✅
+- Migrar métodos relacionados a comandos do ChatArceeMCP
+- Garantir que o comportamento seja idêntico ao original
+- Implementar testes de unidade
+
+**Tarefas em Andamento**:
+- ✅ Criar pasta `src/exceptions` 
+- ✅ Implementar hierarquia de exceções personalizadas
+- ✅ Criar classe `CommandProcessor` em `src/chat/command_processor.py`
+- ⏳ Atualizar ChatArceeMCP para usar a nova classe
+
+##### Sub-Cluster 1.3: Interfaces e Adaptadores (Complexidade: Média)
+**Justificativa**: Exige compreensão de injeção de dependência e flexibilidade no design de interfaces.
+
+**Abordagem**:
+- Criar interfaces abstratas em `src/interfaces/`
+- Implementar adaptadores para as integrações existentes
+- Criar ServiceFactory para instanciação
+
+**Tarefas**:
+- ⏳ Criar pasta `src/interfaces`
+- ⏳ Implementar interfaces `LLMClient`, `MCPService` e `TaskService`
+- ⏳ Criar adaptadores para implementações existentes
+- ⏳ Implementar ServiceFactory
+
+##### Sub-Cluster 1.4: Integração Final (Complexidade: Alta)
+**Justificativa**: Integra todos os componentes e requer migração cuidadosa para evitar regressões.
+
+**Abordagem**:
+- Refatorar gradualmente a classe ChatArceeMCP
+- Atualizar script principal para usar ServiceFactory
+- Implementar testes de integração abrangentes
+
+**Tarefas**:
+- ⏳ Refatorar classe ChatArceeMCP
+- ⏳ Atualizar script principal
+- ⏳ Implementar testes de integração
+
+#### Cluster 2: Robustez e Tratamento de Erros (Complexidade: Média)
+Foco em melhorar a robustez e tratamento de erros do sistema.
+
+**Tarefas**:
+- ✅ Implementar hierarquia de exceções personalizadas
+- ⏳ Adicionar tratamento de erros consistente
+- ⏳ Melhorar logs e feedback ao usuário
+
+#### Cluster 3: Limpeza de Código (Complexidade: Baixa) ✅
+Foco em melhorar a qualidade e legibilidade do código.
+
+**Tarefas Concluídas**:
+- ✅ Remover código não utilizado
+- ✅ Adicionar comentários em áreas complexas do código
+- ✅ Padronizar formatação
+
+#### Cluster 4: Testes e Documentação (Complexidade: Média)
+Foco em melhorar a cobertura de testes e a documentação.
+
+**Tarefas**:
+- ⏳ Implementar testes unitários
+- ⏳ Implementar testes de integração
+- ⏳ Melhorar README e documentação
+
+### Ordem Recomendada de Implementação
+1. ✅ Cluster 3: Limpeza de Código
+2. ✅ Sub-Cluster 1.1: Extração de Classes Básicas
+3. 🔄 Sub-Cluster 1.2: Processamento de Comandos
+4. ⏳ Cluster 2: Robustez e Tratamento de Erros
+5. ⏳ Sub-Cluster 1.3: Interfaces e Adaptadores
+6. ⏳ Sub-Cluster 1.4: Integração Final
+7. ⏳ Cluster 4: Testes e Documentação
+
 ## Divisão do Cluster 1 em Sub-Clusters de Menor Complexidade
 
 Para facilitar a implementação do Cluster 1 (Arquitetura e Design), que possui alta complexidade, dividimos em sub-clusters menores que podem ser abordados sequencialmente:
