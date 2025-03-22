@@ -26,32 +26,32 @@ Foco em reestruturar a arquitetura do sistema para facilitar manutenção e exte
 - ✅ Implementar classe `ChatUI` em `src/chat/chat_ui.py`
 - ✅ Criar arquivo `__init__.py` para exportar as classes
 
-##### Sub-Cluster 1.2: Processamento de Comandos (Complexidade: Média) 🔄
+##### Sub-Cluster 1.2: Processamento de Comandos (Complexidade: Média) ✅
 **Justificativa**: Envolve lógica mais complexa e integração com Airtable.
 
 **Abordagem**:
 - Criar classe CommandProcessor em `src/chat/command_processor.py` ✅
-- Migrar métodos relacionados a comandos do ChatArceeMCP
-- Garantir que o comportamento seja idêntico ao original
+- Migrar métodos relacionados a comandos do ChatArceeMCP ✅
+- Garantir que o comportamento seja idêntico ao original ✅
 - Implementar testes de unidade
 
-**Tarefas em Andamento**:
+**Tarefas Concluídas**:
 - ✅ Criar pasta `src/exceptions` 
 - ✅ Implementar hierarquia de exceções personalizadas
 - ✅ Criar classe `CommandProcessor` em `src/chat/command_processor.py`
-- ⏳ Atualizar ChatArceeMCP para usar a nova classe
+- ✅ Atualizar pasta `chat` para exportar a nova classe
 
-##### Sub-Cluster 1.3: Interfaces e Adaptadores (Complexidade: Média)
+##### Sub-Cluster 1.3: Interfaces e Adaptadores (Complexidade: Média) 🔄
 **Justificativa**: Exige compreensão de injeção de dependência e flexibilidade no design de interfaces.
 
 **Abordagem**:
-- Criar interfaces abstratas em `src/interfaces/`
+- Criar interfaces abstratas em `src/interfaces/` ✅
 - Implementar adaptadores para as integrações existentes
 - Criar ServiceFactory para instanciação
 
-**Tarefas**:
-- ⏳ Criar pasta `src/interfaces`
-- ⏳ Implementar interfaces `LLMClient`, `MCPService` e `TaskService`
+**Tarefas em Andamento**:
+- ✅ Criar pasta `src/interfaces`
+- ✅ Implementar interfaces `LLMClient`, `MCPService` e `TaskService`
 - ⏳ Criar adaptadores para implementações existentes
 - ⏳ Implementar ServiceFactory
 
@@ -95,9 +95,9 @@ Foco em melhorar a cobertura de testes e a documentação.
 ### Ordem Recomendada de Implementação
 1. ✅ Cluster 3: Limpeza de Código
 2. ✅ Sub-Cluster 1.1: Extração de Classes Básicas
-3. 🔄 Sub-Cluster 1.2: Processamento de Comandos
-4. ⏳ Cluster 2: Robustez e Tratamento de Erros
-5. ⏳ Sub-Cluster 1.3: Interfaces e Adaptadores
+3. ✅ Sub-Cluster 1.2: Processamento de Comandos
+4. 🔄 Sub-Cluster 1.3: Interfaces e Adaptadores
+5. ⏳ Cluster 2: Robustez e Tratamento de Erros
 6. ⏳ Sub-Cluster 1.4: Integração Final
 7. ⏳ Cluster 4: Testes e Documentação
 
