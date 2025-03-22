@@ -9,40 +9,6 @@ Este documento visualiza como os diferentes clusters da refatoração se relacio
    - Implementação de interfaces para desacoplamento
    - Injeção de dependências para testabilidade
 
-2. **Cluster de Robustez e Tratamento de Erros** (Complexidade: Média) ✅
-   - Sistema de exceções personalizadas
-   - Tratamento de erros específicos
-   - Logging detalhado para depuração
-
-3. **Cluster de Limpeza de Código** (Complexidade: Baixa) ✅
-   - Remoção de código não utilizado
-   - Melhoria de legibilidade
-   - Documentação de APIs
-
-4. **Cluster de Testes e Validação** (Complexidade: Média)
-   - Testes unitários
-   - Testes de integração
-   - Mocks para serviços externos
-
-5. **Cluster de Revisão e Documentação** (Complexidade: Baixa)
-   - Documentação de arquitetura
-   - Atualização de README
-   - Revisão final
-
-## Matriz de Dependências
-
-A matriz abaixo mostra as dependências entre os clusters. "X" indica que o cluster da linha depende do cluster da coluna para sua implementação ideal.
-
-|                                   | Arquitetura | Robustez | Limpeza | Testes | Revisão |
-|-----------------------------------|-------------|----------|---------|--------|---------|
-| **Cluster de Arquitetura**        |      -      |    X     |    ✓    |        |         |
-| **Cluster de Robustez**           |             |     -    |    ✓    |        |         |
-| **Cluster de Testes**             |      X      |    X     |    ✓    |    -   |         |
-| **Cluster de Revisão**            |      X      |    X     |    ✓    |    X   |    -    |
-
-Legenda:
-- X: Dependência forte (o cluster da linha depende do cluster da coluna)
-- ✓: Cluster já concluído
 
 ## Fluxo de Implementação
 
@@ -408,42 +374,7 @@ classDiagram
           sys.exit(1)
   ```
 
-### Cluster 2: Robustez e Tratamento de Erros
-
-**Objetivo**: Melhorar a resiliência do código e o tratamento de situações excepcionais.
-
-**Riscos**: Falhas na captura de exceções, inconsistências no tratamento de erros.
-
-#### Tarefas:
-
-- [x] **Sistema de Exceções**
-  - [x] Criar hierarquia de exceções personalizadas (MpccliException como base)
-  - [x] Implementar exceções específicas (LLMApiError, ConfigurationError, etc.)
-
-- [x] **Tratamento de Erros**
-  - [x] Refinar try/catch para capturar exceções específicas
-  - [x] Implementar feedback mais detalhado ao usuário
-  - [x] Adicionar logging para depuração
-
-### Cluster 3: Limpeza de Código
-
-**Objetivo**: Remover código não utilizado e simplificar a base de código.
-
-**Riscos**: Remoção acidental de código necessário.
-
-#### Tarefas:
-
-- [x] **Remoção de Código Não Utilizado**
-  - [x] Remover o método get_server_tools()
-  - [x] Avaliar e documentar ou remover start_server()
-  - [x] Identificar e remover outros métodos, importações ou parâmetros não utilizados
-
-- [x] **Melhoria de Legibilidade**
-  - [x] Dividir método process_special_commands() em funções menores
-  - [x] Atualizar documentação de classes e métodos
-  - [x] Adicionar comentários em áreas complexas
-
-### Cluster 4: Testes e Validação
+###  Testes e Validação
 
 **Objetivo**: Garantir a qualidade e estabilidade do código refatorado.
 
@@ -483,7 +414,7 @@ classDiagram
   - [ ] Desenvolver mocks para ArceeClient
   - [ ] Desenvolver mocks para Airtable API
 
-### Cluster 5: Revisão e Documentação
+###  Revisão e Documentação
 
 **Objetivo**: Finalizar a documentação e revisar a aderência às regras de desenvolvimento.
 
@@ -509,25 +440,7 @@ classDiagram
    - [ ] Implementar interfaces e adapters
    - [ ] Implementar ServiceFactory
 
-2. **Fase 2: Melhorias de Robustez** ✅
-   - [x] Implementar exceções personalizadas
-   - [x] Refinar tratamento de erros
-   - [x] Adicionar logging detalhado
 
-3. **Fase 3: Limpeza e Documentação** ✅
-   - [x] Remover código não utilizado
-   - [x] Atualizar documentação
-   - [x] Adicionar comentários explicativos em áreas complexas
-
-4. **Fase 4: Testes e Validação**
-   - [ ] Desenvolver testes unitários
-   - [ ] Desenvolver testes de integração
-   - [ ] Validar funcionalidades em ambiente real
-
-5. **Fase 5: Revisão Final**
-   - [ ] Revisar aderência às regras do `.cursorrules`
-   - [ ] Validar performance
-   - [ ] Incorporar feedback de usuários
 
 ## Próximos Passos Detalhados
 
@@ -555,8 +468,112 @@ Considerando as dependências e o trabalho já realizado, recomenda-se a seguint
    - Depende da separação clara de responsabilidades
    - Facilitada pela arquitetura orientada a interfaces
 
-Os Clusters 2 (Robustez) e 3 (Limpeza) já foram concluídos, o que proporciona uma base sólida para a implementação do Cluster 1 (Arquitetura). 
+Os Clusters 2 (Robustez) e 3 (Limpeza) já foram concluídos, o que proporciona uma base sólida para a implementação do Cluster 1 (Arquitetura).
 
+## Divisão do Cluster 1 em Sub-Clusters de Menor Complexidade
+
+Para facilitar a implementação do Cluster 1 (Arquitetura e Design), que possui alta complexidade, dividimos em sub-clusters menores que podem ser abordados sequencialmente:
+
+### Sub-Cluster 1.1: Extração de Classes Básicas (Complexidade: Baixa)
+
+**Componentes:**
+- Extração da classe ChatHistory
+- Extração da classe ChatUI
+
+**Por que a complexidade é baixa:**
+- São classes com responsabilidade única e bem definida
+- Não possuem dependências complexas
+- Não alteram o comportamento existente do sistema
+- Podem ser implementadas e testadas isoladamente
+
+**Abordagem:**
+1. Criar a pasta `src/chat` para organizar as novas classes
+2. Implementar a classe ChatHistory com métodos para gerenciar mensagens
+3. Implementar a classe ChatUI para interação com usuário
+4. Criar testes unitários simples para validar o comportamento básico
+
+### Sub-Cluster 1.2: Processamento de Comandos (Complexidade: Média)
+
+**Componentes:**
+- Extração da classe CommandProcessor
+- Migração da lógica de processamento de comandos
+
+**Por que a complexidade é média:**
+- Envolve lógica mais complexa de processamento de comandos
+- Depende da integração com Airtable
+- Usa expressões regulares e processamento de texto
+- Precisa manter compatibilidade com o comportamento atual
+
+**Abordagem:**
+1. Criar a classe CommandProcessor em `src/chat/command_processor.py`
+2. Migrar métodos relacionados a comandos da classe ChatArceeMCP
+3. Garantir que o comportamento seja idêntico ao original
+4. Usar as exceções personalizadas já implementadas
+5. Implementar testes para verificar o processamento correto de comandos
+
+### Sub-Cluster 1.3: Interfaces e Adaptadores (Complexidade: Média)
+
+**Componentes:**
+- Criação de interfaces abstratas (LLMClient, MCPService, TaskService)
+- Implementação de adaptadores para serviços existentes
+- Criação do ServiceFactory
+
+**Por que a complexidade é média:**
+- Requer compreensão do padrão de injeção de dependências
+- Precisa definir interfaces que sejam suficientemente flexíveis
+- Deve manter compatibilidade com as implementações atuais
+- Precisa prever extensibilidade futura
+
+**Abordagem:**
+1. Criar interfaces abstratas em `src/interfaces/`
+2. Implementar adaptadores que encapsulam as implementações existentes
+3. Criar o ServiceFactory para instanciar os serviços apropriados
+4. Implementar testes para verificar o funcionamento correto dos adaptadores
+
+### Sub-Cluster 1.4: Integração Final (Complexidade: Alta)
+
+**Componentes:**
+- Refatoração da classe principal ChatArceeMCP
+- Atualização do script principal para usar o novo design
+
+**Por que a complexidade é alta:**
+- Integra todos os componentes desenvolvidos nos sub-clusters anteriores
+- Representa uma mudança significativa na arquitetura do sistema
+- Requer cuidadosa migração para evitar regressões
+- Afeta o fluxo principal de execução do aplicativo
+
+**Abordagem:**
+1. Refatorar gradualmente a classe ChatArceeMCP para usar as novas classes
+2. Implementar versão refatorada mantendo a versão original como referência
+3. Atualizar o script principal para usar o ServiceFactory
+4. Implementar testes de integração completos
+5. Validar o comportamento do sistema antes de remover código antigo
+
+**Fluxo de Implementação dos Sub-Clusters:**
+
+```mermaid
+graph TD
+    A[Cluster 3: Limpeza de Código] -->|Concluído| B[Cluster 2: Robustez]
+    B -->|Concluído| C1[Sub-Cluster 1.1: Classes Básicas]
+    C1 --> C2[Sub-Cluster 1.2: Processamento de Comandos]
+    C2 --> C3[Sub-Cluster 1.3: Interfaces e Adaptadores]
+    C3 --> C4[Sub-Cluster 1.4: Integração Final]
+    C4 --> D[Cluster 4: Testes e Validação]
+    
+    style A fill:#90EE90,stroke:#006400
+    style B fill:#90EE90,stroke:#006400
+    style C1 fill:#FFD700,stroke:#B8860B
+    style C2 fill:#FFA500,stroke:#FF8C00
+    style C3 fill:#FFA500,stroke:#FF8C00
+    style C4 fill:#FF6347,stroke:#FF4500
+```
+
+Esta abordagem sequencial permite:
+- Começar com tarefas mais simples e ganhar confiança
+- Construir uma base sólida antes de abordar partes mais complexas
+- Testar cada componente isoladamente antes da integração
+- Reduzir o risco de introdução de bugs
+- Facilitar revisões de código mais focadas
 
 ## Mapa de Relações entre Clusters
 
