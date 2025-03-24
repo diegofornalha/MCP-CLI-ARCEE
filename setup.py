@@ -17,7 +17,7 @@ setup(
     description="CLI para interagir com a API do Arcee AI",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/arcee-ai/arcee-cli",
+    url="https://github.com/diegofornalha/MCP-CLI-ARCEE",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",

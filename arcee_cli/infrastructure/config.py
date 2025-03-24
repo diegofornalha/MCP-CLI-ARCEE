@@ -52,7 +52,10 @@ def configure(api_key: Optional[str] = None, org: Optional[str] = None) -> None:
     # Se não foi fornecida uma chave API, solicita ao usuário
     if not api_key:
         api_key = Prompt.ask(
-            "🔑 Digite sua chave API", password=True, default=config.get("api_key", "")
+            "🔑 Digite sua chave API",
+            password=True,
+            default=config.get("api_key", ""),
+            show_default=False,  # Não mostra o valor padrão
         )
 
     # Se não foi fornecida uma organização, solicita ao usuário

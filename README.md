@@ -1,6 +1,6 @@
 # Arcee CLI
 
-CLI para interagir com a API da Arcee AI.
+CLI para interagir com a API da Arcee AI Client.
 
 ## Instalação
 
@@ -10,17 +10,26 @@ pip install arcee-cli
 
 ## Configuração
 
-Antes de usar, configure sua chave API:
+Existem duas formas de configurar sua chave API:
+
+### 1. Configuração via comando (Recomendado)
+
+Esta é a forma recomendada e tem prioridade sobre o arquivo `.env`:
 
 ```bash
 arcee configure
 ```
 
-Ou defina a variável de ambiente:
+### 2. Variáveis de ambiente
 
-```bash
-export ARCEE_API_KEY="sua-chave-api"
+Alternativamente, você pode definir a chave API no arquivo `.env` na raiz do projeto:
+
+```env
+ARCEE_API_KEY=sua-chave-api
+ARCEE_MODEL=auto
 ```
+
+**Observação**: A chave configurada via `arcee configure` sempre terá prioridade sobre a definida no arquivo `.env`.
 
 ## Uso
 
@@ -32,6 +41,14 @@ Inicie uma conversa com a IA:
 arcee chat
 ```
 
+### Configure
+
+Configure sua chave API interativamente:
+
+```bash
+arcee configure
+```
+
 ### Teste
 
 Teste a conexão com a API:
@@ -39,9 +56,3 @@ Teste a conexão com a API:
 ```bash
 arcee teste
 ```
-
-## Variáveis de Ambiente
-
-- `ARCEE_API_KEY`: Sua chave API da Arcee
-- `ARCEE_MODEL`: Modelo a ser usado (padrão: "auto")
-- `ARCEE_ORG`: ID da organização (opcional)
