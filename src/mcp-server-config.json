@@ -1,8 +1,0 @@
-{
-  "airtable-server": {
-    "command": "node",
-    "args": [
-      "./src/load_env_and_run_server.js"
-    ]
-  }
-}

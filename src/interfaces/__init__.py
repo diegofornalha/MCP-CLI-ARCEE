@@ -11,5 +11,7 @@ integrações do sistema, facilitando a extensibilidade e testabilidade.
 from src.interfaces.llm_client import LLMClient
 from src.interfaces.mcp_service import MCPService
 from src.interfaces.task_service import TaskService
+from src.interfaces.rest_service import RestService
+from src.interfaces.file_service import FileService
 
-__all__ = ['LLMClient', 'MCPService', 'TaskService'] 
+__all__ = ['LLMClient', 'MCPService', 'TaskService', 'RestService', 'FileService'] 

@@ -19,9 +19,11 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Arquivos de ambiente e configuração
 .env
@@ -38,6 +40,23 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Coverage e testes
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
 
 # Arquivos temporários
 *.tmp
@@ -94,3 +113,23 @@ desktop.ini
 chaves_api.txt
 .airtable.json
 config.json
+
+# Documentação
+docs/_build/
+
+# IDEs e editores
+.pybuilder/
+target/
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+
+# Ferramentas de análise estática
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Debug
+cython_debug/
