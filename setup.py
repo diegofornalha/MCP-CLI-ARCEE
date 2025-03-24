@@ -41,6 +41,7 @@ setup(
         "prompt-toolkit>=3.0.20",
         "pytest>=7.0.0",
         "typer>=0.9.0",
+        "openai>=1.12.0",
     ],
     entry_points={
         "console_scripts": [

@@ -52,12 +52,29 @@ def chat():
                 continue
 
             # Extrai a resposta da IA
-            if "choices" in response and len(response["choices"]) > 0:
-                ai_message = response["choices"][0]["message"]
-                print(f"\n🤖 Arcee: {ai_message['content']}\n")
+            if "text" in response:
+                print(f"\n🤖 Arcee: {response['text']}\n")
 
                 # Adiciona resposta ao contexto
-                messages.append(ai_message)
+                messages.append({"role": "assistant", "content": response["text"]})
+
+                # Exibe informações do modelo se disponíveis
+                if response.get("selected_model"):
+                    print("\n--- Informações do Modelo ---")
+                    print(
+                        f"Modelo selecionado: {response.get('selected_model', 'desconhecido')}"
+                    )
+                    print(
+                        f"Razão da seleção: {response.get('selection_reason', 'não informada')}"
+                    )
+                    print(
+                        f"Tipo de tarefa: {response.get('task_type', 'não informado')}"
+                    )
+                    print(f"Domínio: {response.get('domain', 'não informado')}")
+                    print(
+                        f"Complexidade: {response.get('complexity', 'não informada')}"
+                    )
+                    print("-----------------------------")
             else:
                 print("❌ Resposta inválida da API")
 
