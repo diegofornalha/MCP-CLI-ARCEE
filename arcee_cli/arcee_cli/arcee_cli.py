@@ -9,10 +9,7 @@ import os
 import sys
 import argparse
 from dotenv import load_dotenv
-
-# Importar o cliente Arcee
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.llm.providers.arcee_client import ArceeClient
+from .arcee_client import ArceeClient
 
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
