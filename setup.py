@@ -17,10 +17,11 @@ setup(
         "rich>=10.0.0",
         "prompt-toolkit>=3.0.20",
         "pytest>=7.0.0",
+        "typer>=0.9.0",
     ],
     entry_points={
         "console_scripts": [
-            "arcee=arcee_cli.presentation.cli:main",
+            "arcee=arcee_cli.__main__:app",
         ],
     },
     classifiers=[
@@ -37,4 +38,4 @@ setup(
     python_requires=">=3.7",
     include_package_data=True,
     zip_safe=False,
-) 
+)
