@@ -1,0 +1,6 @@
+requests>=2.25.0
+python-dotenv>=0.15.0
+colorama>=0.4.4
+rich>=10.0.0
+prompt-toolkit>=3.0.20
+pytest>=7.0.0  # Para testes 
