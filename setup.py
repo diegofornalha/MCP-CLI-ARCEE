@@ -20,7 +20,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "arcee=arcee_cli.arcee_cli:main",
+            "arcee=arcee_cli.presentation.cli:main",
         ],
     },
     classifiers=[

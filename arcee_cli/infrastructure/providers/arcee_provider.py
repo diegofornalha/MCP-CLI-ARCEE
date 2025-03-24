@@ -9,7 +9,7 @@ import os
 import requests
 from typing import Dict, List, Tuple, Optional
 
-class ArceeClient:
+class ArceeProvider:
     """Cliente para comunicação com a API do Arcee AI"""
     
     def __init__(self):

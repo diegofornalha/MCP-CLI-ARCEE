@@ -9,7 +9,7 @@ import os
 import sys
 import argparse
 from dotenv import load_dotenv
-from .arcee_client import ArceeClient
+from ..infrastructure.providers.arcee_provider import ArceeProvider
 
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -24,7 +24,7 @@ def test_connection(args):
         print(f"API key configurada: {bool(api_key)}")
         print(f"Primeiros 5 caracteres da API key: {api_key[:5] if api_key else 'AUSENTE'}")
         
-        client = ArceeClient()
+        client = ArceeProvider()
         print(f"Cliente Arcee inicializado com URL: {client.api_url}")
         print(f"Modelo configurado: {client.model}")
         
@@ -53,7 +53,7 @@ def test_connection(args):
 def chat_with_arcee(args):
     """Inicia uma conversa com o modelo Arcee AI"""
     try:
-        client = ArceeClient()
+        client = ArceeProvider()
         
         print("\n🤖 Iniciando chat com Arcee AI. Digite 'sair' para encerrar.\n")
         

@@ -32,10 +32,10 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["arcee_cli"]
+where = ["."]
 
 [project.scripts]
-arcee = "arcee_cli.arcee_cli:main"
+arcee = "arcee_cli.presentation.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
