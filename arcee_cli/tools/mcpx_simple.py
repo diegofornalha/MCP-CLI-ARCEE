@@ -17,7 +17,7 @@ from typing import Dict, Any, List, Optional, Callable
 # Configuração de logging
 logger = logging.getLogger("mcpx_simple")
 
-def run_command_with_timeout(cmd: str, timeout: int = 15) -> Dict[str, Any]:
+def run_command_with_timeout(cmd: str, timeout: int = 60) -> Dict[str, Any]:
     """
     Executa um comando com timeout usando threads
     
@@ -169,7 +169,7 @@ class MCPRunClient:
             logger.debug(f"Comando: {cmd}")
             
             # Executa o comando com nossa função personalizada de timeout
-            result = run_command_with_timeout(cmd, timeout=20)
+            result = run_command_with_timeout(cmd, timeout=60)
             
             if "error" in result:
                 logger.error(f"Erro na execução do comando: {result['error']}")
