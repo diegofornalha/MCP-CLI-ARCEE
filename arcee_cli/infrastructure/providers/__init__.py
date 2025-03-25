@@ -1,4 +1,6 @@
-"""Providers para integração com serviços externos."""
+"""
+Provedores de serviços
+"""
 
 from .arcee_provider import ArceeProvider
 

@@ -1,1 +1,3 @@
-"""Módulos de infraestrutura."""
+"""
+Módulo de infraestrutura
+"""

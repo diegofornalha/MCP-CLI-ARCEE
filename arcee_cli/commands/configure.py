@@ -15,7 +15,6 @@ from rich.prompt import Prompt
 
 def configure(
     api_key: Optional[str] = None,
-    api_url: Optional[str] = None,  # mantido para compatibilidade
     org: Optional[str] = None,
 ):
     """Configura a CLI do Arcee"""
