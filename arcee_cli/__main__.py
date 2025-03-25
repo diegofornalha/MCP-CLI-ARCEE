@@ -5,19 +5,13 @@
 CLI do Arcee AI
 """
 
-import typer
+from typing import Optional
 import json
-import os
+import typer
 from rich import print
+from rich.panel import Panel
 from rich.prompt import Prompt
-import time
-from getpass import getpass
-from typing import Dict, Any, List, Optional, Union
-
 from rich.console import Console
-from prompt_toolkit import PromptSession
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 
 from arcee_cli.infrastructure.providers.arcee_provider import ArceeProvider
 from arcee_cli.infrastructure.config import configure as config_setup
@@ -33,7 +27,17 @@ try:
 except ImportError:
     CREW_AVAILABLE = False
 
-app = typer.Typer(help="CLI do Arcee AI - Converse com IA de forma simples")
+app = typer.Typer(
+    help="""
+    🤖 CLI do Arcee AI
+
+    Esta CLI permite interagir com a plataforma Arcee AI.
+    Use o comando 'configure' para configurar sua chave de API.
+    Use o comando 'chat' para iniciar uma conversa com o modelo.
+    Use o comando 'teste' para verificar a conexão com a API.
+    """
+)
+
 console = Console()
 
 # Provedor global para ser reutilizado em diferentes comandos
@@ -48,7 +52,7 @@ def get_mcp_client():
 
 
 def execute_veyrax_command(
-    comando: str, ferramenta: str, metodo: str, parametros: str = None
+    comando: str, ferramenta: str, metodo: str, parametros: Optional[str] = None
 ):
     """Executa um comando do VeyraX"""
     try:
@@ -62,7 +66,7 @@ def execute_veyrax_command(
                 params = json.loads(parametros)
             except json.JSONDecodeError as e:
                 print(f"❌ Erro ao processar parâmetros JSON: {e}")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from e
 
         # Executa o comando
         print(f"🚀 Chamando ferramenta '{ferramenta}' método '{metodo}'...")
@@ -78,7 +82,7 @@ def execute_veyrax_command(
 
     except Exception as e:
         print(f"❌ Erro ao executar comando: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 def get_provider():
@@ -123,557 +127,56 @@ def get_crew():
     return _crew
 
 
-def configure_secrets():
-    """
-    Configura as credenciais e preferências através de entrada interativa
-    """
-    print("🔧 Configuração do Arcee CLI")
-
-    # Tenta obter as chaves atuais
-    chave_atual_arcee = None
-    chave_atual_veyrax = None
-
-    try:
-        provider = get_provider()
-        chave_atual_arcee = provider.api_key
-    except:
-        pass
-
-    try:
-        cliente = CursorClient()
-        chave_atual_veyrax = cliente.api_key
-    except:
-        pass
-
-    # Configura chave Arcee
-    print("\n1. Configuração da chave Arcee")
-    if chave_atual_arcee:
-        print(f"Chave Arcee atual: {chave_atual_arcee[:8]}..." + "*" * 20)
-        if (
-            not Prompt.ask(
-                "Deseja alterar a chave Arcee?", choices=["s", "n"], default="n"
-            )
-            == "s"
-        ):
-            print("✅ Chave Arcee mantida")
-        else:
-            print("\nVocê pode obter sua chave Arcee em:")
-            print("https://arcee.ai/settings")
-            nova_chave_arcee = getpass("\nDigite sua chave Arcee: ")
-            if not nova_chave_arcee:
-                print("❌ Chave Arcee não pode ser vazia")
-                return
-            chave_atual_arcee = nova_chave_arcee
-    else:
-        print("\nVocê pode obter sua chave Arcee em:")
-        print("https://arcee.ai/settings")
-        nova_chave_arcee = getpass("\nDigite sua chave Arcee: ")
-        if not nova_chave_arcee:
-            print("❌ Chave Arcee não pode ser vazia")
-            return
-        chave_atual_arcee = nova_chave_arcee
-
-    # Configura chave VeyraX
-    print("\n2. Configuração da chave VeyraX")
-    if chave_atual_veyrax:
-        print(f"Chave VeyraX atual: {chave_atual_veyrax[:8]}..." + "*" * 20)
-        if (
-            not Prompt.ask(
-                "Deseja alterar a chave VeyraX?", choices=["s", "n"], default="n"
-            )
-            == "s"
-        ):
-            print("✅ Chave VeyraX mantida")
-        else:
-            print("\nVocê pode obter sua chave VeyraX em:")
-            print("https://veyrax.arcee.ai/settings")
-            nova_chave_veyrax = getpass("\nDigite sua chave VeyraX: ")
-            if not nova_chave_veyrax:
-                print("❌ Chave VeyraX não pode ser vazia")
-                return
-            chave_atual_veyrax = nova_chave_veyrax
-    else:
-        print("\nVocê pode obter sua chave VeyraX em:")
-        print("https://veyrax.arcee.ai/settings")
-        nova_chave_veyrax = getpass("\nDigite sua chave VeyraX: ")
-        if not nova_chave_veyrax:
-            print("❌ Chave VeyraX não pode ser vazia")
-        return
-        chave_atual_veyrax = nova_chave_veyrax
-
-    # Decide onde salvar
-    print("\nOnde deseja salvar a configuração?")
-    print("1. Configuração global do Cursor (~/.cursor/config.json)")
-    print("2. Arquivo .env no projeto")
-
-    opcao = Prompt.ask("Escolha", choices=["1", "2"], default="1")
-
-    if opcao == "1":
-        # Salva no config.json do Cursor
-        config = {}
-        cursor_config = os.path.expanduser("~/.cursor/config.json")
-
-        # Carrega configuração existente se houver
-        if os.path.exists(cursor_config):
-            try:
-                with open(cursor_config) as f:
-                    config = json.load(f)
-            except:
-                pass
-
-        # Atualiza as chaves
-        if chave_atual_arcee:
-            config["arceeApiKey"] = chave_atual_arcee
-        if chave_atual_veyrax:
-            config["veyraxApiKey"] = chave_atual_veyrax
-
-        # Salva a configuração
-        with open(cursor_config, "w") as f:
-            json.dump(config, f, indent=2)
-
-        print(f"✅ Configuração salva em {cursor_config}")
-
-    else:
-        # Salva no .env do projeto
-        env_content = []
-
-        # Carrega conteúdo existente se houver
-        if os.path.exists(".env"):
-            with open(".env") as f:
-                env_content = f.readlines()
-
-        # Remove linhas existentes com as chaves
-        env_content = [
-            line
-            for line in env_content
-            if not line.startswith(("ARCEE_API_KEY=", "VEYRAX_API_KEY="))
-        ]
-
-        # Adiciona as novas chaves
-        if chave_atual_arcee:
-            env_content.append(f"ARCEE_API_KEY={chave_atual_arcee}\n")
-        if chave_atual_veyrax:
-            env_content.append(f"VEYRAX_API_KEY={chave_atual_veyrax}\n")
-
-        # Salva o arquivo
-        with open(".env", "w") as f:
-            f.writelines(env_content)
-
-        print("✅ Configuração salva no arquivo .env")
-
-    print("\n✨ Configuração concluída com sucesso!")
-
-
-def execute_teste_command():
-    """
-    Executa um teste de funcionalidade
-    """
-    print("Testando funcionalidade")
-    print(f"Diretório atual: {os.getcwd()}")
-    print(f"Variáveis de ambiente: {os.environ.get('PATH')}")
-
-
-def iniciar_chat():
-    """
-    Inicia uma conversa com a IA usando o CLI
-    """
-    print("🤖 Arcee AI - Chat Interativo")
-    print("\nDigite 'sair' para encerrar o chat")
-    print("Comandos disponíveis:")
-    print("  veyrax:tools - Lista as ferramentas disponíveis")
-    print("  veyrax:memory - Lista todas as memórias")
-    print("  veyrax:memory save <conteúdo> <ferramenta> - Salva uma memória")
+@app.command()
+def chat():
+    """Inicia um chat com o Arcee AI"""
     print(
-        "  veyrax:memory get [ferramenta] [limit] [offset] - Lista memórias com filtro e paginação"
+        Panel(
+            "🤖 Chat com Arcee AI\n\nDigite 'sair' para encerrar.",
+            title="Arcee AI",
+        )
     )
-    print("  veyrax:memory update <id> <conteúdo> <ferramenta> - Atualiza uma memória")
-    print("  veyrax:memory delete <id> - Deleta uma memória")
-    print("  cursor: <pergunta> - Envia uma pergunta diretamente para o Cursor Agent")
 
-    # Configura a porta do MCP
-    os.environ["MCP_PORT"] = "8082"  # Garante que use a porta correta
-
-    historial = []
-    cliente = CursorClient()  # Inicializa o cliente uma vez só
+    provider = get_provider()
+    messages = []
 
     while True:
         try:
-            # Obter entrada do usuário
-            mensagem = Prompt.ask("\n💬 Você")
+            user_input = Prompt.ask("\nVocê")
 
-            if mensagem.lower() in ["sair", "exit", "quit", "q"]:
-                print("👋 Até logo!")
+            if user_input.lower() == "sair":
                 break
 
-            # Verifica se é um comando para listar memórias em linguagem natural
-            if mensagem.lower() in [
-                "lista todas as memórias",
-                "listar memórias",
-                "mostrar memórias",
-                "ver memórias",
-                "memórias",
-                "lista memórias",
-                "list memories",
-                "show memories",
-            ]:
-                print("\n🤖 Arcee AI")
-                try:
-                    resultado = cliente.get_memories()
-                    if "error" in resultado:
-                        print(f"❌ Erro ao listar memórias: {resultado['error']}")
-                    else:
-                        print("✅ Memórias encontradas:")
-                        if isinstance(resultado, dict) and "content" in resultado:
-                            content = resultado.get("content", [])
-                            if (
-                                content
-                                and isinstance(content, list)
-                                and len(content) > 0
-                            ):
-                                text = content[0].get("text", "")
-                                try:
-                                    # Tenta parsear o texto como JSON
-                                    data = json.loads(text)
-                                    print(
-                                        json.dumps(data, indent=2, ensure_ascii=False)
-                                    )
-                                except:
-                                    # Se não for JSON, imprime como texto
-                                    print(text)
-                            else:
-                                print(
-                                    json.dumps(resultado, indent=2, ensure_ascii=False)
-                                )
-                        else:
-                            print(json.dumps(resultado, indent=2, ensure_ascii=False))
-                    continue
-                except Exception as e:
-                    print(f"❌ Erro ao executar comando: {str(e)}")
-                    continue
+            messages.append({"role": "user", "content": user_input})
+            response = provider.generate_content_chat(messages)
 
-            # Verifica se é um comando para o Cursor Agent
-            if mensagem.lower().startswith("cursor:"):
-                query = mensagem[7:].strip()  # Remove "cursor:" do início
-                print("\n🤖 Arcee AI")
-                try:
-                    resultado = cliente.query_cursor_agent(query)
-                    if "error" in resultado:
-                        print(f"❌ Erro ao executar Cursor Agent: {resultado['error']}")
-                    else:
-                        if isinstance(resultado, dict):
-                            if resultado.get("success"):
-                                print(resultado["response"])
-                            else:
-                                print(
-                                    f"❌ Erro: {resultado.get('error', 'Erro desconhecido')}"
-                                )
-                        else:
-                            print(resultado)
-                    continue
-                except Exception as e:
-                    print(f"❌ Erro ao executar comando: {str(e)}")
-                    continue
-
-            # Verifica se é um comando veyrax
-            if mensagem.lower().startswith(("veyrax:", "ferramenta veyrax")):
-                print("\n🤖 Arcee AI")
-                try:
-                    # Remove o prefixo e divide os argumentos
-                    if mensagem.lower().startswith("veyrax:"):
-                        args = mensagem[7:].strip().split()
-                    else:
-                        args = (
-                            mensagem[16:].strip().split()
-                        )  # Remove "ferramenta veyrax"
-
-                    if not args:
-                        # Mostra ajuda se não houver argumentos
-                        print("Comandos VeyraX disponíveis:")
-                        print("  veyrax:tools - Lista todas as ferramentas")
-                        print("  veyrax:memory - Lista todas as memórias")
-                        print(
-                            "  veyrax:memory save <conteúdo> <ferramenta> - Salva uma memória"
-                        )
-                        print(
-                            "  veyrax:memory get [ferramenta] [limit] [offset] - Lista memórias com filtro"
-                        )
-                        print(
-                            "  veyrax:memory update <id> <conteúdo> <ferramenta> - Atualiza uma memória"
-                        )
-                        print("  veyrax:memory delete <id> - Deleta uma memória")
-                        continue
-
-                    comando = args[0].lower()
-
-                    if comando == "tools":
-                        # Lista ferramentas
-                        resultado = cliente.get_tools()
-                        if "error" in resultado:
-                            print(
-                                f"❌ Erro ao listar ferramentas: {resultado['error']}"
-                            )
-                        else:
-                            print("✅ Ferramentas disponíveis:")
-                            print(json.dumps(resultado, indent=2, ensure_ascii=False))
-
-                    elif comando == "memory":
-                        if len(args) < 2:
-                            # Lista todas as memórias com paginação padrão
-                            resultado = cliente.get_memories()
-                        else:
-                            subcomando = args[1].lower()
-
-                            if subcomando == "save" and len(args) >= 4:
-                                # Salva uma memória
-                                resultado = cliente.save_memory(args[2], args[3])
-
-                            elif subcomando == "get":
-                                # Prepara parâmetros de paginação e filtro
-                                tool = args[2] if len(args) > 2 else None
-                                limit = int(args[3]) if len(args) > 3 else 10
-                                offset = int(args[4]) if len(args) > 4 else 0
-                                resultado = cliente.get_memories(tool, limit, offset)
-
-                            elif subcomando == "update" and len(args) >= 5:
-                                # Atualiza uma memória
-                                resultado = cliente.update_memory(
-                                    args[2], args[3], args[4]
-                                )
-
-                            elif subcomando == "delete" and len(args) >= 3:
-                                # Deleta uma memória
-                                resultado = cliente.delete_memory(args[2])
-
-                            else:
-                                print("❌ Comando inválido ou parâmetros insuficientes")
-                                print("Uso:")
-                                print("  veyrax:memory - Lista todas as memórias")
-                                print(
-                                    "  veyrax:memory save <conteúdo> <ferramenta> - Salva uma memória"
-                                )
-                                print(
-                                    "  veyrax:memory get [ferramenta] [limit] [offset] - Lista memórias com filtro"
-                                )
-                                print(
-                                    "  veyrax:memory update <id> <conteúdo> <ferramenta> - Atualiza uma memória"
-                                )
-                                print(
-                                    "  veyrax:memory delete <id> - Deleta uma memória"
-                                )
-                                continue
-
-                        if "error" in resultado:
-                            print(f"❌ Erro ao executar comando: {resultado['error']}")
-                        else:
-                            print("✅ Resultado:")
-                            if isinstance(resultado, dict) and "content" in resultado:
-                                content = resultado.get("content", [])
-                                if (
-                                    content
-                                    and isinstance(content, list)
-                                    and len(content) > 0
-                                ):
-                                    text = content[0].get("text", "")
-                                    try:
-                                        # Tenta parsear o texto como JSON
-                                        data = json.loads(text)
-                                        print(
-                                            json.dumps(
-                                                data, indent=2, ensure_ascii=False
-                                            )
-                                        )
-                                    except:
-                                        # Se não for JSON, imprime como texto
-                                        print(text)
-                                else:
-                                    print(
-                                        json.dumps(
-                                            resultado, indent=2, ensure_ascii=False
-                                        )
-                                    )
-                            else:
-                                print(
-                                    json.dumps(resultado, indent=2, ensure_ascii=False)
-                                )
-
-                    else:
-                        print("❌ Comando desconhecido")
-                        print("Comandos disponíveis:")
-                        print("  veyrax:tools - Lista todas as ferramentas")
-                        print("  veyrax:memory - Lista todas as memórias")
-                        print(
-                            "  veyrax:memory save <conteúdo> <ferramenta> - Salva uma memória"
-                        )
-                        print(
-                            "  veyrax:memory get [ferramenta] [limit] [offset] - Lista memórias com filtro"
-                        )
-                        print(
-                            "  veyrax:memory update <id> <conteúdo> <ferramenta> - Atualiza uma memória"
-                        )
-                        print("  veyrax:memory delete <id> - Deleta uma memória")
-
-                except Exception as e:
-                    print(f"❌ Erro ao executar comando: {str(e)}")
+            if "error" in response:
+                print(f"❌ {response['error']}")
                 continue
 
-            # Processa a mensagem normal
-            historial.append({"role": "user", "content": mensagem})
-
-            # Obtém o provedor e envia a mensagem
-            provider = get_provider()
-            resposta = provider.chat(mensagem, historial)
-
-            print(f"\n🤖 Arcee AI")
-            print(resposta)
-
-            historial.append({"role": "assistant", "content": resposta})
+            if "choices" in response and response["choices"]:
+                assistant_message = response["choices"][0]["message"]
+                messages.append(assistant_message)
+                print(f"\nAssistente: {assistant_message['content']}")
+            else:
+                print("❌ Resposta inválida do modelo")
 
         except KeyboardInterrupt:
-            print("\n👋 Chat interrompido. Até logo!")
             break
         except Exception as e:
-            print(f"\n❌ Erro: {str(e)}")
-            continue
+            print(f"❌ Erro: {str(e)}")
+            break
 
-
-def iniciar_agente():
-    """
-    Inicia o agente automatizado para auxiliar com tarefas
-    """
-    from arcee_cli.agent.arcee_agent import ArceeAgent
-
-    print("🤖 Arcee Agent ativado")
-
-    # Cria e executa o agente
-    agente = ArceeAgent()
-    agente.executar()
+    print("\nAté logo! 👋")
 
 
 @app.command()
-def chat(
-    mensagem: str = typer.Argument(
-        None, help="Mensagem para enviar diretamente ao chat"
-    ),
-    cursor: bool = typer.Option(
-        False, "--cursor", "-c", help="Envia a mensagem para o Cursor Agent"
-    ),
+def configure(
+    api_key: str = typer.Option(None, help="Chave da API do Arcee"),
+    org: str = typer.Option(None, help="Organização do Arcee"),
 ):
-    """Inicia uma conversa com a IA ou envia uma mensagem direta"""
-    if mensagem:
-        if cursor:
-            try:
-                cliente = CursorClient()
-                sucesso, resultado = cliente.tool_call(
-                    "cursor_agent", "query", {"query": mensagem}
-                )
-
-                if not sucesso:
-                    print(f"❌ Erro ao executar Cursor Agent: {resultado}")
-                else:
-                    if isinstance(resultado, dict):
-                        if resultado.get("success"):
-                            print(resultado["response"])
-                        else:
-                            print(
-                                f"❌ Erro: {resultado.get('error', 'Erro desconhecido')}"
-                            )
-                    else:
-                        print(resultado)
-            except Exception as e:
-                print(f"❌ Erro ao executar comando: {str(e)}")
-        else:
-            # Processa a mensagem normal
-            provider = get_provider()
-            resposta = provider.chat(mensagem)
-            print(f"\n🤖 Arcee AI")
-            print(resposta)
-    else:
-        iniciar_chat()
-
-
-@app.command()
-def configure():
-    """Configura as credenciais e preferências"""
-    configure_secrets()
-
-
-@app.command()
-def teste():
-    """Executa testes de funcionalidade"""
-    execute_teste_command()
-
-
-@app.command()
-def veyrax(
-    comando: Optional[str] = typer.Argument(None, help="Comando (tools, call)"),
-    ferramenta: Optional[str] = typer.Argument(
-        None, help="Nome da ferramenta (para comando call)"
-    ),
-    metodo: Optional[str] = typer.Argument(
-        None, help="Nome do método (para comandos call)"
-    ),
-    parametros: Optional[str] = typer.Option(
-        None, "--parametros", "-p", help="Parâmetros em formato JSON"
-    ),
-):
-    """
-    Executa comandos relacionados ao MCP Server.
-
-    Exemplos:
-
-    \b
-    # Listar ferramentas
-    arcee veyrax tools
-
-    \b
-    # Salvar memória
-    arcee veyrax call veyrax save_memory --parametros '{"memory": "conteúdo", "tool": "nome_ferramenta"}'
-
-    \b
-    # Listar memórias com paginação
-    arcee veyrax call veyrax get_memory --parametros '{"tool": "nome_ferramenta", "limit": 10, "offset": 0}'
-
-    \b
-    # Atualizar memória
-    arcee veyrax call veyrax update_memory --parametros '{"id": "id_memoria", "memory": "novo_conteudo", "tool": "nome_ferramenta"}'
-
-    \b
-    # Deletar memória
-    arcee veyrax call veyrax delete_memory --parametros '{"id": "id_memoria"}'
-    """
-    execute_veyrax_command(comando, ferramenta, metodo, parametros)
-
-
-@app.command()
-def agent():
-    """Inicia uma conversa com a IA usando o Arcee Agent"""
-    iniciar_agente()
-
-
-@app.command()
-def mcp(
-    host: str = typer.Option("localhost", help="Host do servidor MCP"),
-    port: int = typer.Option(8081, help="Porta do servidor MCP"),
-):
-    """
-    Inicia o servidor MCP do Arcee.
-
-    Exemplo:
-    arcee mcp --host localhost --port 8081
-    """
-    import os
-    from arcee_cli.infrastructure.mcp.mcp_server import run_server
-
-    # Define as variáveis de ambiente para o servidor
-    os.environ["MCP_HOST"] = host
-    os.environ["MCP_PORT"] = str(port)
-
-    # Inicia o servidor com as configurações personalizadas
-    try:
-        run_server(host, port)
-    except Exception as e:
-        print(f"❌ Erro ao iniciar o servidor: {str(e)}")
-        raise
+    """Configura a CLI do Arcee"""
+    config_setup(api_key=api_key, org=org)
 
 
 if __name__ == "__main__":

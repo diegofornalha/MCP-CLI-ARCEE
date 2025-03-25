@@ -61,9 +61,7 @@ def configure(api_key: Optional[str] = None, org: Optional[str] = None) -> None:
     # Se não foi fornecida uma organização, solicita ao usuário
     if (
         not org
-        and Prompt.ask(
-            "👥 Deseja configurar uma organização?", choices=["s", "n"], default="n"
-        )
+        and Prompt.ask("👥 Deseja configurar uma organização?", choices=["s", "n"], default="n")
         == "s"
     ):
         org = Prompt.ask("Digite o ID da organização", default=config.get("org", ""))

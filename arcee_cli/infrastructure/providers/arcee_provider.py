@@ -47,9 +47,7 @@ class ArceeProvider:
         }
 
         # Configura o cliente OpenAI
-        self.client = OpenAI(
-            api_key=self.api_key, base_url="https://models.arcee.ai/v1"
-        )
+        self.client = OpenAI(api_key=self.api_key, base_url="https://models.arcee.ai/v1")
 
     def _load_api_key_from_config(self) -> str:
         """Carrega a chave API do arquivo de configuração"""
@@ -161,11 +159,7 @@ class ArceeProvider:
                 historico = []
 
             # Adiciona a mensagem atual ao histórico
-            mensagens = (
-                [self.system_message]
-                + historico
-                + [{"role": "user", "content": mensagem}]
-            )
+            mensagens = [self.system_message] + historico + [{"role": "user", "content": mensagem}]
 
             # Gera a resposta
             resposta = self.generate_content_chat(mensagens)

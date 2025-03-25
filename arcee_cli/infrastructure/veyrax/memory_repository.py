@@ -15,9 +15,7 @@ class VeyraXMemoryRepository(MemoryRepository):
         """Salva uma memória no VeyraX."""
         return self.client.save_memory(memory.content, memory.tool_name)
 
-    def get_all(
-        self, tool: Optional[str] = None, limit: int = 10, offset: int = 0
-    ) -> List[Memory]:
+    def get_all(self, tool: Optional[str] = None, limit: int = 10, offset: int = 0) -> List[Memory]:
         """
         Retorna memórias do VeyraX com suporte a paginação e filtragem.
 
@@ -39,17 +37,13 @@ class VeyraXMemoryRepository(MemoryRepository):
                 content=item["memory"],
                 tool_name=item.get("tool", ""),
                 id=item.get("id"),
-                created_at=datetime.fromisoformat(
-                    item["created_at"].replace("Z", "+00:00")
-                ),
+                created_at=datetime.fromisoformat(item["created_at"].replace("Z", "+00:00")),
             )
             memories.append(memory)
 
         return memories
 
-    def get_by_tool(
-        self, tool_name: str, limit: int = 10, offset: int = 0
-    ) -> List[Memory]:
+    def get_by_tool(self, tool_name: str, limit: int = 10, offset: int = 0) -> List[Memory]:
         """
         Retorna memórias de uma ferramenta com suporte a paginação.
 
@@ -75,9 +69,7 @@ class VeyraXMemoryRepository(MemoryRepository):
         """
         # Como não temos um endpoint específico para buscar por ID,
         # buscamos todas e filtramos
-        memories = self.get_all(
-            limit=1000
-        )  # Busca um número grande para tentar encontrar
+        memories = self.get_all(limit=1000)  # Busca um número grande para tentar encontrar
         return next((m for m in memories if m.id == memory_id), None)
 
     def update(self, memory: Memory) -> bool:

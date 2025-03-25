@@ -103,9 +103,7 @@ class ArceeAgent:
             success, result = self.tool_call(tool_name, method_name, params)
 
             if not success:
-                return False, {
-                    "error": f"Erro ao executar {tool_name}.{method_name}: {result}"
-                }
+                return False, {"error": f"Erro ao executar {tool_name}.{method_name}: {result}"}
 
             return True, {"result": result}
 
