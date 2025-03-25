@@ -22,3 +22,5 @@ python scripts/lint.py
 # Testes
 pytest
 ```
+python3 -m pip install -e ".[dev]"
+python3 -m venv venv && source venv/bin/activate

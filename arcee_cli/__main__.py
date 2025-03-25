@@ -12,6 +12,11 @@ from rich import print
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.console import Console
+from rich.table import Table
+import subprocess
+import os
+import signal
+import sys
 
 from arcee_cli.infrastructure.providers.arcee_provider import ArceeProvider
 from arcee_cli.infrastructure.config import configure as config_setup
@@ -38,12 +43,23 @@ app = typer.Typer(
     """
 )
 
+# Cria um grupo de comandos para o MCP
+mcp_app = typer.Typer(
+    help="""
+    🔌 Gerenciamento de ferramentas MCP
+
+    Comandos para gerenciar as ferramentas do MCP.
+    """
+)
+app.add_typer(mcp_app, name="mcp")
+
 console = Console()
 
 # Provedor global para ser reutilizado em diferentes comandos
 _provider = None
 _agent = None
 _crew = None
+_mcp_processo = None
 
 
 def get_mcp_client():
@@ -154,17 +170,23 @@ def chat():
                 print(f"❌ {response['error']}")
                 continue
 
-            if "choices" in response and response["choices"]:
-                assistant_message = response["choices"][0]["message"]
-                messages.append(assistant_message)
-                print(f"\nAssistente: {assistant_message['content']}")
+            # O ArceeProvider retorna a resposta na chave 'text'
+            if "text" in response:
+                content = response["text"]
+                # Adiciona a resposta ao histórico
+                messages.append({"role": "assistant", "content": content})
+                print(f"\nAssistente: {content}")
             else:
-                print("❌ Resposta inválida do modelo")
+                # Fallback para o formato antigo (caso haja alterações futuras)
+                print("⚠️ Formato de resposta não reconhecido")
+                print(f"Chaves disponíveis: {list(response.keys())}")
 
         except KeyboardInterrupt:
             break
         except Exception as e:
             print(f"❌ Erro: {str(e)}")
+            import traceback
+            traceback.print_exc()
             break
 
     print("\nAté logo! 👋")
@@ -179,5 +201,163 @@ def configure(
     config_setup(api_key=api_key, org=org)
 
 
+@mcp_app.command("iniciar")
+def iniciar_mcp(
+    porta: int = typer.Option(8083, help="Porta para o servidor MCP personalizado"),
+    substituir_padrao: bool = typer.Option(
+        True, help="Substitui a porta padrão do MCP nas requisições"
+    ),
+):
+    """Inicia o servidor MCP personalizado com filtragem de ferramentas"""
+    global _mcp_processo
+
+    # Verifica se já existe um processo em execução
+    if _mcp_processo and _mcp_processo.poll() is None:
+        print("❌ Servidor MCP já está em execução")
+        return
+
+    try:
+        # Define a porta do MCP personalizado
+        os.environ["MCP_PORT"] = str(porta)
+
+        # Inicia o servidor em processo separado
+        from arcee_cli.infrastructure.mcp.server import iniciar_servidor
+        
+        print(f"🚀 Iniciando servidor MCP personalizado na porta {porta}...")
+        
+        # Usa multiprocessing para iniciar o servidor
+        import multiprocessing
+        processo = multiprocessing.Process(target=iniciar_servidor, args=("0.0.0.0", porta))
+        processo.daemon = True
+        processo.start()
+        
+        print(f"✅ Servidor MCP personalizado iniciado com sucesso (PID: {processo.pid})")
+        print("📋 Use 'arcee mcp listar' para ver as ferramentas disponíveis")
+        
+        # Guarda o processo
+        _mcp_processo = processo
+        
+    except Exception as e:
+        print(f"❌ Erro ao iniciar servidor MCP: {e}")
+        raise typer.Exit(1) from e
+
+
+@mcp_app.command("parar")
+def parar_mcp():
+    """Para o servidor MCP personalizado"""
+    global _mcp_processo
+    
+    if not _mcp_processo:
+        print("❌ Servidor MCP não está em execução")
+        return
+        
+    try:
+        print("🛑 Parando servidor MCP personalizado...")
+        
+        # Termina o processo
+        _mcp_processo.terminate()
+        _mcp_processo.join(timeout=5)
+        
+        if _mcp_processo.is_alive():
+            print("⚠️ Processo não terminou normalmente, forçando encerramento...")
+            _mcp_processo.kill()
+            
+        print("✅ Servidor MCP personalizado parado com sucesso")
+        _mcp_processo = None
+    except Exception as e:
+        print(f"❌ Erro ao parar servidor MCP: {e}")
+        raise typer.Exit(1) from e
+
+
+@mcp_app.command("listar")
+def listar_ferramentas():
+    """Lista todas as ferramentas disponíveis no MCP"""
+    try:
+        # Obtém o cliente MCP
+        client = get_mcp_client()
+        
+        # Importa funções de gerenciamento
+        from arcee_cli.infrastructure.mcp.mcp_config import (
+            listar_ferramentas_disponiveis,
+            filtrar_ferramentas,
+            obter_ferramentas_ativas,
+            obter_ferramentas_inativas,
+        )
+        
+        print("🔍 Obtendo lista de ferramentas disponíveis...")
+        todas_ferramentas = listar_ferramentas_disponiveis(client)
+        
+        # Filtra as ferramentas
+        ferramentas_filtradas = filtrar_ferramentas(todas_ferramentas)
+        ferramentas_ativas = ferramentas_filtradas["ativas"]
+        ferramentas_inativas = ferramentas_filtradas["inativas"]
+        
+        # Cria a tabela
+        tabela = Table(title="🔌 Ferramentas MCP")
+        tabela.add_column("Nome", style="cyan")
+        tabela.add_column("Status", style="green")
+        
+        # Adiciona as ferramentas ativas
+        for ferramenta in ferramentas_ativas:
+            tabela.add_row(ferramenta, "✅ Ativa")
+            
+        # Adiciona as ferramentas inativas
+        for ferramenta in ferramentas_inativas:
+            tabela.add_row(ferramenta, "❌ Inativa")
+            
+        # Exibe a tabela
+        console.print(tabela)
+        
+    except Exception as e:
+        print(f"❌ Erro ao listar ferramentas: {e}")
+        raise typer.Exit(1) from e
+
+
+@mcp_app.command("ativar")
+def ativar_ferramenta(
+    nome: str = typer.Argument(..., help="Nome da ferramenta para ativar")
+):
+    """Ativa uma ferramenta do MCP"""
+    try:
+        from arcee_cli.infrastructure.mcp.mcp_config import ativar_ferramenta as ativar
+        
+        print(f"🔌 Ativando ferramenta '{nome}'...")
+        if ativar(nome):
+            print(f"✅ Ferramenta '{nome}' ativada com sucesso")
+        else:
+            print(f"❌ Erro ao ativar ferramenta '{nome}'")
+            
+    except Exception as e:
+        print(f"❌ Erro ao ativar ferramenta: {e}")
+        raise typer.Exit(1) from e
+
+
+@mcp_app.command("desativar")
+def desativar_ferramenta(
+    nome: str = typer.Argument(..., help="Nome da ferramenta para desativar")
+):
+    """Desativa uma ferramenta do MCP"""
+    try:
+        from arcee_cli.infrastructure.mcp.mcp_config import desativar_ferramenta as desativar
+        
+        print(f"🔌 Desativando ferramenta '{nome}'...")
+        if desativar(nome):
+            print(f"✅ Ferramenta '{nome}' desativada com sucesso")
+        else:
+            print(f"❌ Erro ao desativar ferramenta '{nome}'")
+            
+    except Exception as e:
+        print(f"❌ Erro ao desativar ferramenta: {e}")
+        raise typer.Exit(1) from e
+
+
 if __name__ == "__main__":
-    app()
+    try:
+        app()
+    except KeyboardInterrupt:
+        # Certifica-se de que os processos são encerrados
+        if _mcp_processo and hasattr(_mcp_processo, 'terminate'):
+            _mcp_processo.terminate()
+        
+        print("\n👋 Programa encerrado pelo usuário")
+        sys.exit(0)

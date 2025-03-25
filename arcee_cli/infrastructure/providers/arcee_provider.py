@@ -116,6 +116,9 @@ class ArceeProvider:
             Dict[str, Any]: Resposta processada
         """
         try:
+            # Depuração - Mostra a resposta bruta
+            print(f"DEBUG: Resposta bruta recebida: {response}")
+            
             # Extrai o texto da resposta
             content = response.choices[0].message.content
 
@@ -132,10 +135,17 @@ class ArceeProvider:
                 "raw_response": response,
             }
 
+            # Depuração - Mostra a resposta processada
+            print(f"DEBUG: Resposta processada: {processed_response}")
+            
             return processed_response
 
         except Exception as e:
             print(f"❌ Erro ao processar resposta da Arcee: {e}")
+            print(f"DEBUG: Tipo da resposta: {type(response)}")
+            if hasattr(response, 'choices'):
+                print(f"DEBUG: Choices: {response.choices}")
+            
             return {
                 "text": "",
                 "error": f"Falha ao processar resposta: {str(e)}",
