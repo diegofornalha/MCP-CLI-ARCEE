@@ -222,15 +222,24 @@ def chat():
             
             # Se é sobre Trello mas não é um comando específico ou foi um comando não reconhecido
             if is_trello_cmd and not trello_response:
+                # Feedback imediato para o usuário
+                print("\nAssistente: 🔍 Processando sua consulta sobre o Trello... aguarde um momento.")
+                
                 # Criar uma versão modificada da mensagem para o modelo
                 # para que ele saiba que é sobre Trello mas não é um comando reconhecido
                 trello_context_message = {
                     "role": "system", 
                     "content": "O usuário está perguntando sobre o Trello, mas não usou um comando específico reconhecido. " + 
-                              "Por favor, responda de forma conversacional e informativa sobre a funcionalidade do Trello, " +
-                              "orientando como usar os comandos disponíveis: " +
+                              "Responda de forma breve e conversacional sobre o Trello, fazendo perguntas para entender melhor o que o usuário deseja. " +
+                              "O Trello é uma ferramenta de gerenciamento de projetos que permite organizar tarefas em quadros, listas e cartões. " +
+                              "A implementação atual suporta comandos para gerenciar quadros, listas e cards. " +
+                              "\n\nTente descobrir qual aspecto do Trello interessa ao usuário (quadros, listas, cards, etc.) e " +
+                              "forneça informações específicas sobre isso, sugerindo comandos relevantes. " +
+                              "Por exemplo, se o usuário parece interessado em quadros, sugira 'mostrar quadros', 'criar quadro', etc. " +
+                              "\n\nMenções a funcionalidades como checklists, etiquetas, comentários e anexos devem reconhecer que " +
+                              "estas são funcionalidades do Trello, mas direcionar o usuário para os comandos atualmente implementados: " +
                               "'mostrar quadros', 'mostrar listas', 'listar listas do quadro com id [ID]', " +
-                              "'criar lista', 'criar card', 'criar quadro', 'apagar quadro', etc."
+                              "'criar lista', 'criar card', 'criar quadro', 'apagar quadro'."
                 }
                 
                 # Cria uma cópia dos messages para não modificar a lista original
@@ -1444,53 +1453,162 @@ def apagar_quadro_trello(
 @trello_app.command("listar-quadros")
 def listar_quadros_trello():
     """Lista todos os quadros do usuário no Trello"""
-    # Obtém as credenciais diretamente do ambiente
-    api_key = os.getenv("TRELLO_API_KEY")
-    token = os.getenv("TRELLO_TOKEN")
-    
-    if not api_key or not token:
-        print("❌ Credenciais do Trello não encontradas.")
-        print("Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos no arquivo .env")
-        return
-    
     try:
-        # Parâmetros da requisição
-        params = {
-            "key": api_key,
-            "token": token,
-            "filter": "open"  # Apenas quadros abertos
+        api_key = os.getenv("TRELLO_API_KEY")
+        token = os.getenv("TRELLO_TOKEN")
+        
+        if not api_key or not token:
+            typer.echo("Erro: TRELLO_API_KEY e TRELLO_TOKEN devem estar definidos como variáveis de ambiente")
+            raise typer.Exit(code=1)
+        
+        url = "https://api.trello.com/1/members/me/boards"
+        query = {
+            'key': api_key,
+            'token': token,
+            'fields': 'name,url'
         }
         
-        # Faz a requisição para obter os quadros
-        response = requests.get("https://api.trello.com/1/members/me/boards", params=params)
-        response.raise_for_status()
+        response = requests.get(url, params=query)
         
+        if response.status_code != 200:
+            typer.echo(f"Erro ao obter quadros do Trello: {response.status_code}")
+            raise typer.Exit(code=1)
+            
         quadros = response.json()
         
         if not quadros:
-            print("ℹ️ Nenhum quadro encontrado.")
+            typer.echo("Nenhum quadro encontrado.")
             return
             
-        # Imprime os quadros encontrados
-        print(f"📋 Quadros do Trello ({len(quadros)} encontrados):\n")
-        
+        typer.echo("Quadros do Trello:")
         for quadro in quadros:
-            nome = quadro.get('name', 'N/A')
-            id_quadro = quadro.get('id', 'N/A')
-            url = quadro.get('shortUrl', 'N/A')
-            desc = quadro.get('desc', '')
+            typer.echo(f"- {quadro['name']} (ID: {quadro['id']}, URL: {quadro['url']})")
             
-            print(f"• {nome}")
-            print(f"  ID: {id_quadro}")
-            print(f"  URL: {url}")
-            if desc:
-                print(f"  Descrição: {desc}")
-            print("")
+    except Exception as e:
+        typer.echo(f"Erro ao listar quadros do Trello: {str(e)}")
+        raise typer.Exit(code=1)
+
+@trello_app.command("buscar-card")
+def buscar_card_trello(
+    termo: str = typer.Argument(..., help="Nome ou parte do nome do card a ser localizado"),
+    quadro_id: Optional[str] = typer.Option(None, "--quadro", "-q", help="ID do quadro específico para buscar (opcional)")
+):
+    """Busca um card pelo nome e mostra em qual lista ele está localizado"""
+    try:
+        api_key = os.getenv("TRELLO_API_KEY")
+        token = os.getenv("TRELLO_TOKEN")
+        
+        if not api_key or not token:
+            typer.echo("Erro: TRELLO_API_KEY e TRELLO_TOKEN devem estar definidos como variáveis de ambiente")
+            raise typer.Exit(code=1)
+        
+        # Se o quadro_id não foi especificado, busca em todos os quadros
+        if not quadro_id:
+            # Obter todos os quadros do usuário
+            url = "https://api.trello.com/1/members/me/boards"
+            query = {
+                'key': api_key,
+                'token': token,
+                'fields': 'name,url'
+            }
             
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Erro ao listar quadros: {str(e)}")
-        if hasattr(e, 'response') and e.response:
-            print(f"Resposta: {e.response.text}")
+            response = requests.get(url, params=query)
+            
+            if response.status_code != 200:
+                typer.echo(f"Erro ao obter quadros do Trello: {response.status_code}")
+                raise typer.Exit(code=1)
+                
+            quadros = response.json()
+            
+            if not quadros:
+                typer.echo("Nenhum quadro encontrado.")
+                return
+        else:
+            # Usa apenas o quadro especificado
+            url = f"https://api.trello.com/1/boards/{quadro_id}"
+            query = {
+                'key': api_key,
+                'token': token,
+                'fields': 'name,url'
+            }
+            
+            response = requests.get(url, params=query)
+            
+            if response.status_code != 200:
+                typer.echo(f"Erro ao obter o quadro especificado: {response.status_code}")
+                raise typer.Exit(code=1)
+                
+            quadro = response.json()
+            quadros = [quadro]
+        
+        cards_encontrados = []
+        
+        # Para cada quadro, busca os cards que correspondem ao termo
+        for quadro in quadros:
+            quadro_id = quadro['id']
+            quadro_nome = quadro['name']
+            
+            # Obter todas as listas do quadro para mapear IDs para nomes
+            listas_url = f"https://api.trello.com/1/boards/{quadro_id}/lists"
+            listas_query = {
+                'key': api_key,
+                'token': token,
+                'fields': 'name'
+            }
+            
+            listas_response = requests.get(listas_url, params=listas_query)
+            
+            if listas_response.status_code != 200:
+                typer.echo(f"Erro ao obter listas do quadro {quadro_nome}: {listas_response.status_code}")
+                continue
+                
+            listas = listas_response.json()
+            listas_map = {lista['id']: lista['name'] for lista in listas}
+            
+            # Obter todos os cards do quadro
+            cards_url = f"https://api.trello.com/1/boards/{quadro_id}/cards"
+            cards_query = {
+                'key': api_key,
+                'token': token,
+                'fields': 'name,url,idList'
+            }
+            
+            cards_response = requests.get(cards_url, params=cards_query)
+            
+            if cards_response.status_code != 200:
+                typer.echo(f"Erro ao obter cards do quadro {quadro_nome}: {cards_response.status_code}")
+                continue
+                
+            cards = cards_response.json()
+            
+            # Filtrar os cards pelo termo de busca
+            for card in cards:
+                if termo.lower() in card['name'].lower():
+                    card_info = {
+                        'nome': card['name'],
+                        'quadro_nome': quadro_nome,
+                        'lista_nome': listas_map.get(card['idList'], "Lista desconhecida"),
+                        'url': card['url']
+                    }
+                    cards_encontrados.append(card_info)
+        
+        # Exibir resultados
+        if not cards_encontrados:
+            typer.echo(f"Nenhum card encontrado com o termo '{termo}'.")
+            return
+            
+        typer.echo(f"Cards encontrados com o termo '{termo}':")
+        for idx, card in enumerate(cards_encontrados, 1):
+            typer.echo(f"{idx}. {card['nome']}")
+            typer.echo(f"   Quadro: {card['quadro_nome']}")
+            typer.echo(f"   Lista: {card['lista_nome']}")
+            typer.echo(f"   URL: {card['url']}")
+            if idx < len(cards_encontrados):
+                typer.echo("")  # Linha em branco entre cards
+    
+    except Exception as e:
+        typer.echo(f"Erro ao buscar cards do Trello: {str(e)}")
+        raise typer.Exit(code=1)
 
 # Função principal
 def main():

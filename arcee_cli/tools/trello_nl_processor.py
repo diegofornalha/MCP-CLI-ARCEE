@@ -66,6 +66,9 @@ class TrelloNLProcessor:
             # Apagar quadro
             (r'(apagar?|deletar?|excluir?|remover?)\s+(um\s+)?quadro(\s+do\s+trello)?(\s+com\s+id|\s+com\s+url)?', 'apagar_quadro'),
             
+            # Buscar card
+            (r'(buscar?|localizar?|encontrar?|achar?|procurar?)\s+(um\s+)?(card|cartão|tarefa)(\s+do\s+trello)?(\s+com\s+nome)?(\s+chamado)?', 'buscar_card'),
+            
             # Confirmação (sim, confirmar, etc.)
             (r'^(sim|s|yes|y|confirmar|confirmo|pode|concordo)$', 'confirmar'),
         ]
@@ -128,6 +131,41 @@ class TrelloNLProcessor:
             
             if match_quadro_id:
                 params['quadro_id'] = match_quadro_id.group(1).strip()
+            elif match_quadro_url:
+                url = match_quadro_url.group(1).strip()
+                # Extrai o ID do quadro da URL
+                match_id = re.search(r'trello\.com/b/([^/]+)', url)
+                if match_id:
+                    params['quadro_id'] = match_id.group(1)
+                params['quadro_url'] = url
+                
+        elif tipo_comando == 'buscar_card':
+            # Tenta extrair o nome do card a buscar
+            nome_card_patterns = [
+                r'(?:chamado|com\s+nome)\s+["\']?([^"\']+)["\']?',
+                r'(?:card|cartão|tarefa)\s+["\']?([^"\']+)["\']?',
+                r'(?:buscar|localizar|encontrar|achar|procurar)[^"\']*["\']([^"\']+)["\']'
+            ]
+            
+            card_nome = None
+            for pattern in nome_card_patterns:
+                match = re.search(pattern, texto)
+                if match:
+                    card_nome = match.group(1).strip()
+                    break
+                    
+            if card_nome:
+                params['card_nome'] = card_nome
+                
+            # Tenta extrair o ID ou nome do quadro específico
+            match_quadro_id = re.search(r'(?:quadro|board)\s+(?:com\s+id|id)\s+["\']?([A-Za-z0-9]+)["\']?', texto)
+            match_quadro_nome = re.search(r'(?:quadro|board)\s+(?:chamado|com\s+nome)\s+["\']?([^"\']+)["\']?', texto)
+            match_quadro_url = re.search(r'(?:quadro|board)\s+(?:com\s+url|url)\s+["\']?(https?://trello\.com/b/[A-Za-z0-9]+(?:/[^"\']*)?)["\']?', texto)
+            
+            if match_quadro_id:
+                params['quadro_id'] = match_quadro_id.group(1).strip()
+            elif match_quadro_nome:
+                params['quadro_nome'] = match_quadro_nome.group(1).strip()
             elif match_quadro_url:
                 url = match_quadro_url.group(1).strip()
                 # Extrai o ID do quadro da URL
@@ -223,7 +261,7 @@ class TrelloNLProcessor:
         Returns:
             Resposta do comando ou None se não foi possível processar
         """
-        if not self.agent and tipo_comando not in ['listar_listas', 'criar_card', 'listar_quadros', 'criar_quadro', 'apagar_quadro', 'confirmar']:
+        if not self.agent and tipo_comando not in ['listar_listas', 'criar_card', 'listar_quadros', 'criar_quadro', 'apagar_quadro', 'confirmar', 'buscar_card']:
             return "❌ Agente não disponível para processar comandos do Trello"
             
         try:
@@ -253,6 +291,9 @@ class TrelloNLProcessor:
                 
             elif tipo_comando == 'apagar_quadro':
                 return self._comando_apagar_quadro(params)
+                
+            elif tipo_comando == 'buscar_card':
+                return self._comando_buscar_card(params)
                 
             elif tipo_comando == 'confirmar':
                 return self._comando_confirmar()
@@ -821,4 +862,139 @@ class TrelloNLProcessor:
         elif len(resultados) == 1:
             return resultados[0]
         else:
-            return "\n".join(resultados) 
+            return "\n".join(resultados)
+    
+    def _comando_buscar_card(self, params: Dict[str, Any]) -> str:
+        """Processa o comando para buscar um card pelo nome."""
+        import requests
+        import os
+        
+        # Verifica se temos o nome do card a ser buscado
+        if 'card_nome' not in params:
+            return "Por favor, especifique o nome ou parte do nome do card a ser buscado."
+        
+        termo_busca = params['card_nome']
+        
+        # Obtém as credenciais do Trello
+        api_key = os.getenv("TRELLO_API_KEY")
+        token = os.getenv("TRELLO_TOKEN")
+        
+        if not api_key or not token:
+            return "Credenciais do Trello não encontradas. Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos."
+        
+        # Parâmetros base para as requisições
+        auth_params = {
+            "key": api_key,
+            "token": token
+        }
+        
+        # Quadros a serem pesquisados
+        quadros_para_buscar = []
+        
+        try:
+            # Se foi fornecido um ID de quadro específico
+            if 'quadro_id' in params:
+                # Verifica se o quadro existe
+                response = requests.get(f"https://api.trello.com/1/boards/{params['quadro_id']}", params=auth_params)
+                response.raise_for_status()
+                board_info = response.json()
+                quadros_para_buscar.append({"id": params['quadro_id'], "name": board_info.get("name", "N/A")})
+            
+            # Se foi fornecido um nome de quadro
+            elif 'quadro_nome' in params:
+                # Lista todos os quadros e filtra pelo nome
+                response = requests.get("https://api.trello.com/1/members/me/boards", params=auth_params)
+                response.raise_for_status()
+                all_boards = response.json()
+                
+                # Filtra os quadros pelo nome (case insensitive)
+                matching_boards = [
+                    board for board in all_boards 
+                    if params['quadro_nome'].lower() in board.get("name", "").lower()
+                ]
+                
+                if not matching_boards:
+                    return f"Nenhum quadro encontrado com o nome '{params['quadro_nome']}'."
+                
+                for board in matching_boards:
+                    quadros_para_buscar.append({"id": board.get("id"), "name": board.get("name")})
+            
+            # Se não foi especificado nenhum quadro, busca em todos
+            else:
+                response = requests.get("https://api.trello.com/1/members/me/boards", params=auth_params)
+                response.raise_for_status()
+                all_boards = response.json()
+                
+                if not all_boards:
+                    return "Nenhum quadro encontrado na sua conta do Trello."
+                
+                for board in all_boards:
+                    quadros_para_buscar.append({"id": board.get("id"), "name": board.get("name")})
+            
+            # Para armazenar os resultados encontrados
+            resultados = []
+            
+            # Para cada quadro, busca os cards e as listas
+            for quadro in quadros_para_buscar:
+                board_id = quadro["id"]
+                board_name = quadro["name"]
+                
+                # Obtém todas as listas do quadro para mapear IDs para nomes
+                lists_response = requests.get(f"https://api.trello.com/1/boards/{board_id}/lists", params=auth_params)
+                lists_response.raise_for_status()
+                board_lists = lists_response.json()
+                lists_dict = {lst.get("id"): lst.get("name") for lst in board_lists}
+                
+                # Obtém todos os cards do quadro
+                cards_response = requests.get(f"https://api.trello.com/1/boards/{board_id}/cards", params=auth_params)
+                cards_response.raise_for_status()
+                board_cards = cards_response.json()
+                
+                # Filtra os cards pelo termo de busca
+                matching_cards = [
+                    card for card in board_cards 
+                    if termo_busca.lower() in card.get("name", "").lower()
+                ]
+                
+                # Adiciona os resultados encontrados
+                for card in matching_cards:
+                    resultados.append({
+                        "card_id": card.get("id"),
+                        "card_name": card.get("name"),
+                        "card_url": card.get("shortUrl") or card.get("url"),
+                        "board_id": board_id,
+                        "board_name": board_name,
+                        "list_id": card.get("idList"),
+                        "list_name": lists_dict.get(card.get("idList"), "Lista desconhecida")
+                    })
+            
+            # Exibe os resultados
+            if not resultados:
+                return f"Nenhum card encontrado com o termo '{termo_busca}'."
+            
+            # Formata a resposta
+            if len(resultados) == 1:
+                r = resultados[0]
+                return f"Card encontrado: {r['card_name']}\nQuadro: {r['board_name']}\nLista: {r['list_name']}\nURL: {r['card_url']}"
+            
+            resposta = f"Encontrados {len(resultados)} cards correspondentes:\n\n"
+            
+            for i, r in enumerate(resultados, 1):
+                resposta += f"{i}. Card: {r['card_name']}\n"
+                resposta += f"   Quadro: {r['board_name']}\n"
+                resposta += f"   Lista: {r['list_name']}\n"
+                resposta += f"   URL: {r['card_url']}\n\n"
+            
+            return resposta.strip()
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Erro ao acessar a API do Trello: {str(e)}"
+            if hasattr(e, 'response') and e.response:
+                error_msg += f"\nResposta: {e.response.text}"
+            logger.exception(error_msg)
+            return error_msg
+        
+        except Exception as e:
+            error_msg = f"Erro inesperado durante a busca: {str(e)}"
+            logger.exception(error_msg)
+            return error_msg 

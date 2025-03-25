@@ -203,6 +203,58 @@ def _comando_listar_quadros(self) -> str:
     # Implementação usando requests para chamar a API do Trello diretamente para obter todos os quadros
 ```
 
+### 6. Implementação da Funcionalidade de Buscar Cards
+
+#### 6.1 Adição do comando `buscar-card` no CLI
+
+Adicionamos um novo comando ao grupo `trello_app` no arquivo `__main__.py`:
+
+```python
+@trello_app.command("buscar-card")
+def buscar_card_trello(
+    termo: str = typer.Argument(..., help="Nome ou parte do nome do card a ser localizado"),
+    quadro_id: Optional[str] = typer.Option(None, "--quadro", "-q", help="ID do quadro específico para buscar (opcional)")
+):
+    """Busca um card pelo nome e mostra em qual lista ele está localizado"""
+    # Implementação usando requests para chamar a API do Trello diretamente
+```
+
+#### 6.2 Suporte para reconhecimento em linguagem natural
+
+Adicionamos padrões para reconhecer comandos de busca de cards no arquivo `trello_nl_processor.py`:
+
+```python
+# Buscar card
+(r'(buscar?|localizar?|encontrar?|achar?|procurar?)\s+(um\s+)?(card|cartão|tarefa)(\s+do\s+trello)?(\s+com\s+nome)?(\s+chamado)?', 'buscar_card'),
+```
+
+#### 6.3 Implementação do método para processar o comando em linguagem natural
+
+```python
+def _comando_buscar_card(self, params: Dict[str, Any]) -> str:
+    """Processa o comando para buscar um card pelo nome"""
+    # Implementação que busca cards em todos os quadros ou em um quadro específico
+```
+
+#### 6.4 Fluxo de Busca de Cards
+
+O processo implementado para buscar cards segue os seguintes passos:
+
+1. Determinar os quadros a serem pesquisados:
+   - Se um quadro específico foi fornecido (por ID, URL ou nome), busca apenas nele
+   - Caso contrário, busca em todos os quadros do usuário
+
+2. Para cada quadro:
+   - Obter todas as listas usando `GET https://api.trello.com/1/boards/{board_id}/lists`
+   - Obter todos os cards usando `GET https://api.trello.com/1/boards/{board_id}/cards`
+   - Filtrar os cards pelo termo de busca
+   - Mapear o ID da lista de cada card para o nome da lista
+
+3. Exibir os resultados:
+   - Se nenhum card foi encontrado, mostra uma mensagem apropriada
+   - Se apenas um card foi encontrado, mostra detalhes completos
+   - Se múltiplos cards foram encontrados, mostra uma lista com todos eles e suas localizações
+
 ## Detalhes Técnicos da Implementação
 
 ### Acesso à API do Trello 
@@ -226,6 +278,7 @@ Para todas as operações, seguimos o seguinte padrão:
 - **Listar listas**: `GET https://api.trello.com/1/boards/{board_id}/lists`
 - **Criar card**: `POST https://api.trello.com/1/cards`
 - **Listar cards**: `GET https://api.trello.com/1/lists/{list_id}/cards`
+- **Listar todos os cards de um quadro**: `GET https://api.trello.com/1/boards/{board_id}/cards`
 - **Apagar quadro**: `DELETE https://api.trello.com/1/boards/{board_id}`
 - **Listar quadros**: `GET https://api.trello.com/1/members/me/boards`
 
@@ -257,7 +310,16 @@ Para todas as operações, seguimos o seguinte padrão:
    python -m arcee_cli trello criar-card LISTA_ID "Nome do Card" --desc "Descrição do card"
    ```
 
-5. **Apagar um quadro**:
+5. **Buscar um card**:
+   ```
+   python -m arcee_cli trello buscar-card "Nome do Card"
+   ```
+   ou buscando em um quadro específico:
+   ```
+   python -m arcee_cli trello buscar-card "Nome do Card" --quadro BOARD_ID
+   ```
+
+6. **Apagar um quadro**:
    ```
    python -m arcee_cli trello apagar-quadro BOARD_ID
    ```
@@ -280,6 +342,9 @@ Para todas as operações, seguimos o seguinte padrão:
    - "mostrar listas do quadro com id 67e23be62ecfda92a5107264"
    - "mostrar listas do quadro com url https://trello.com/b/67e23be62ecfda92a5107264/nome-do-quadro"
    - "criar card Tarefa Importante na lista A Fazer"
+   - "buscar card Novo tutorial"
+   - "encontrar card chamado Reunião de equipe"
+   - "localizar card Revisão no quadro Projeto XYZ"
    - "apagar quadro com url https://trello.com/b/BOARD_ID/nome-do-quadro"
    - "sim" (para confirmar a exclusão)
 
@@ -292,6 +357,7 @@ Para todas as operações, seguimos o seguinte padrão:
 5. **Operações completas**: Suporte para o ciclo de vida completo de quadros (criar, usar e apagar)
 6. **Visibilidade total**: Capacidade de listar todos os quadros disponíveis na conta do usuário
 7. **Flexibilidade**: Capacidade de trabalhar com múltiplos quadros, especificando-os pelo ID ou URL
+8. **Localização de cards**: Capacidade de buscar cards específicos e mostrar em qual lista e quadro eles estão localizados
 
 ## Próximos Passos Possíveis
 
