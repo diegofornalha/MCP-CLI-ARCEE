@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import os
 import requests
 from datetime import datetime
+from ..infrastructure.providers import ArceeProvider
 
 # Configuração de logging
 logger = logging.getLogger("trello_nl_processor")
@@ -885,20 +886,43 @@ class TrelloNLProcessor:
             if card_response.status_code != 200:
                 return f"❌ Erro ao criar card: {card_response.status_code}\nResposta: {card_response.text}"
             
+            # Verifica se o card foi realmente criado
             card = card_response.json()
             
             # Formata a resposta de sucesso
+            card_id = card.get("id")
             card_nome = card.get("name")
             card_url = card.get("shortUrl")
             
-            resposta = f"✅ Card '{card_nome}' criado com sucesso na lista '{lista_nome_exibir}'!\n"
-            if card_url:
-                resposta += f"URL: {card_url}\n"
+            # Verificação adicional - verifica se o card realmente existe na lista
+            verificacao_url = f"https://api.trello.com/1/lists/{lista_id}/cards"
+            verificacao_response = requests.get(verificacao_url, params=auth_params)
+            
+            card_verificado = False
+            if verificacao_response.status_code == 200:
+                cards_na_lista = verificacao_response.json()
+                for c in cards_na_lista:
+                    if c.get("id") == card_id:
+                        card_verificado = True
+                        break
+            
+            if not card_verificado:
+                # O card não foi encontrado na lista após a criação
+                # Isso pode acontecer por problemas de sincronização ou falhas na API
+                logger.warning(f"Card '{card_nome}' criado, mas não foi encontrado na verificação. ID: {card_id}")
+                resposta = f"⚠️ Card '{card_nome}' possivelmente criado, mas não foi possível verificar. Verifique manualmente na lista '{lista_nome_exibir}'.\n"
+                if card_url:
+                    resposta += f"URL: {card_url}\n"
+            else:
+                # Card verificado com sucesso
+                resposta = f"✅ Card '{card_nome}' criado e verificado com sucesso na lista '{lista_nome_exibir}'!\n"
+                if card_url:
+                    resposta += f"URL: {card_url}\n"
                 
-            # Se tinha data de vencimento, mostra
-            if 'due' in card and card['due']:
-                data_formatada = card['due'].split('T')[0]  # Remove a parte de hora
-                resposta += f"Data de vencimento: {data_formatada}"
+                # Se tinha data de vencimento, mostra
+                if 'due' in card and card['due']:
+                    data_formatada = card['due'].split('T')[0]  # Remove a parte de hora
+                    resposta += f"Data de vencimento: {data_formatada}"
             
             return resposta
             
@@ -1392,4 +1416,120 @@ class TrelloNLProcessor:
         elif cache_key == 'cards' and list_id:
             if list_id not in self.cache[cache_key]:
                 self.cache[cache_key][list_id] = {}
-            self.cache[cache_key][list_id] = {'data': data, 'timestamp': now} 
+            self.cache[cache_key][list_id] = {'data': data, 'timestamp': now}
+
+    def processar_comando_com_llm(self, mensagem: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+        """
+        Usa a LLM para detectar comandos Trello e extrair parâmetros
+        
+        Args:
+            mensagem: Mensagem do usuário
+            
+        Returns:
+            Tupla com (é_comando, tipo_comando, parametros)
+        """
+        # Se for uma confirmação para exclusão e temos quadros pendentes, trata diretamente
+        texto = mensagem.lower()
+        if texto.strip() in ["sim", "s", "yes", "y", "confirmar", "confirmo", "pode", "concordo"] and self.quadros_pendentes_exclusao:
+            return True, 'confirmar', {}
+            
+        # Se não menciona o Trello ou termos relacionados, nem tenta processar
+        if 'trello' not in texto.lower() and not any(termo in texto.lower() for termo in ['card', 'cartão', 'lista', 'tarefa', 'quadro', 'board']):
+            return False, None, {}
+        
+        try:
+            # Inicializa o provider para usar a LLM
+            provider = ArceeProvider()
+            
+            # Mensagens para o modelo
+            mensagens = [
+                {
+                    "role": "system", 
+                    "content": """Você é um assistente especializado em identificar comandos do Trello. 
+                    Sua tarefa é analisar mensagens e determinar se são comandos para o Trello, identificando a intenção e os parâmetros relevantes.
+                    
+                    Comandos suportados:
+                    1. listar_quadros - Listar todos os quadros do usuário
+                    2. listar_listas - Listar todas as listas de um quadro
+                    3. listar_cards - Listar todos os cards de uma lista
+                    4. criar_lista - Criar uma nova lista em um quadro
+                    5. criar_card - Criar um novo card em uma lista
+                    6. arquivar_card - Arquivar um card existente
+                    7. listar_atividade - Listar atividades recentes
+                    8. criar_quadro - Criar um novo quadro
+                    9. apagar_quadro - Apagar um quadro existente
+                    10. buscar_card - Buscar um card por nome
+
+                    Para cada comando, extraia apenas os parâmetros relevantes:
+                    - listar_quadros: Não precisa de parâmetros
+                    - listar_listas: board_id, board_url, quadro_nome
+                    - listar_cards: lista_id, lista_nome
+                    - criar_lista: nome, board_id, quadro_nome
+                    - criar_card: nome, lista_id, lista_nome, descricao, data_vencimento, quadro_nome
+                    - arquivar_card: card_id, card_nome
+                    - listar_atividade: limite (número de atividades)
+                    - criar_quadro: nome, descricao
+                    - apagar_quadro: board_id, board_url, quadro_nome
+                    - buscar_card: termo_busca, board_id, quadro_nome
+                    
+                    Responda em formato JSON com os seguintes campos:
+                    - "e_comando": true/false - Se é um comando do Trello
+                    - "tipo_comando": Nome do comando (ou null se não for comando)
+                    - "parametros": Um objeto com os parâmetros extraídos (ou vazio se não houver)
+                    
+                    Exemplos:
+                    
+                    Entrada: "Mostrar quadros do Trello"
+                    Saída: {"e_comando": true, "tipo_comando": "listar_quadros", "parametros": {}}
+                    
+                    Entrada: "Criar card Revisar documento na lista Tarefas"
+                    Saída: {"e_comando": true, "tipo_comando": "criar_card", "parametros": {"nome": "Revisar documento", "lista_nome": "Tarefas"}}
+                    
+                    Entrada: "Quais são as vendas deste mês?"
+                    Saída: {"e_comando": false, "tipo_comando": null, "parametros": {}}"""
+                },
+                {"role": "user", "content": mensagem}
+            ]
+            
+            # Faz a requisição para a LLM
+            resposta = provider.generate_content_chat(mensagens)
+            
+            if "error" in resposta:
+                logger.error(f"Erro ao processar comando com LLM: {resposta['error']}")
+                # Fallback para o método tradicional
+                return self.detectar_comando(mensagem)
+                
+            # Extrai e processa a resposta
+            if "text" in resposta:
+                try:
+                    # Tenta extrair o JSON da resposta
+                    import json
+                    import re
+                    
+                    # Procura por um bloco JSON na resposta
+                    content_text = resposta["text"]
+                    if isinstance(content_text, str):
+                        json_match = re.search(r'\{.*\}', content_text, re.DOTALL)
+                        if json_match:
+                            resultado = json.loads(json_match.group(0))
+                            
+                            # Extrai os valores
+                            e_comando = resultado.get("e_comando", False)
+                            tipo_comando = resultado.get("tipo_comando")
+                            parametros = resultado.get("parametros", {})
+                            
+                            # Loga o resultado para debug
+                            logger.debug(f"LLM detectou comando: {tipo_comando} com parâmetros: {parametros}")
+                            
+                            return e_comando, tipo_comando, parametros
+                except Exception as e:
+                    logger.error(f"Erro ao processar resposta JSON da LLM: {str(e)}")
+            
+            # Se chegou aqui, algo deu errado - fallback para o método tradicional
+            logger.warning("Fallback para detecção tradicional de comandos")
+            return self.detectar_comando(mensagem)
+            
+        except Exception as e:
+            logger.error(f"Erro ao processar comando com LLM: {str(e)}")
+            # Fallback para o método tradicional
+            return self.detectar_comando(mensagem) 

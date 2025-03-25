@@ -208,9 +208,10 @@ def chat():
             cmd_type = None
             
             if TRELLO_NL_AVAILABLE and trello_processor:
-                is_trello_cmd, cmd_type, cmd_params = trello_processor.detectar_comando(user_input)
+                # Use o novo método baseado em LLM primeiro, com fallback para o tradicional
+                is_trello_cmd, cmd_type, cmd_params = trello_processor.processar_comando_com_llm(user_input)
                 if is_trello_cmd and cmd_type is not None:
-                    logger.info(f"Detectado comando do Trello: {cmd_type}")
+                    logger.info(f"Detectado comando do Trello com LLM: {cmd_type}")
                     trello_response = trello_processor.processar_comando(cmd_type, cmd_params)
             
             # Se foi processado como comando do Trello e temos uma resposta, exibe a resposta
