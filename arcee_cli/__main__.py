@@ -42,93 +42,43 @@ _agent = None
 _crew = None
 
 
+def get_mcp_client():
+    """Obtém uma instância do cliente MCP"""
+    return CursorClient()
+
+
 def execute_veyrax_command(
-    comando: Optional[str],
-    ferramenta: Optional[str],
-    metodo: Optional[str],
-    parametros: Optional[str] = None,
+    comando: str, ferramenta: str, metodo: str, parametros: str = None
 ):
-    """
-    Executa comandos relacionados ao MCP
-
-    Args:
-        comando: Nome do comando (tools, call)
-        ferramenta: Nome da ferramenta (para comando call)
-        metodo: Nome do método (para comandos call)
-        parametros: Parâmetros em formato JSON (para comandos call)
-    """
+    """Executa um comando do VeyraX"""
     try:
-        # Inicializa o cliente Cursor
-        cliente = CursorClient()
+        # Obtém o cliente MCP
+        client = get_mcp_client()
 
-        # Processa o comando
-        if comando == "tools" or (not comando and not ferramenta and not metodo):
-            # Lista ferramentas disponíveis
-            print("🔍 Obtendo lista de ferramentas do MCP Server...")
-            resultado = cliente.get_tools()
+        # Processa os parâmetros
+        params = {}
+        if parametros:
+            try:
+                params = json.loads(parametros)
+            except json.JSONDecodeError as e:
+                print(f"❌ Erro ao processar parâmetros JSON: {e}")
+                raise typer.Exit(1)
 
-            if "error" in resultado:
-                print(f"❌ Erro ao listar ferramentas: {resultado['error']}")
-                return
+        # Executa o comando
+        print(f"🚀 Chamando ferramenta '{ferramenta}' método '{metodo}'...")
+        result = client.tool_call(ferramenta, metodo, params)
 
-            print("✅ Ferramentas disponíveis:")
-            print(json.dumps(resultado, indent=2, ensure_ascii=False))
+        # Processa o resultado
+        if isinstance(result, dict) and "error" in result:
+            print(f"❌ Erro ao executar ferramenta: {result['error']}")
+            raise typer.Exit(1)
 
-        elif comando == "call" and ferramenta and metodo:
-            # Chamada de ferramenta
-            print(f"🚀 Chamando ferramenta '{ferramenta}' método '{metodo}'...")
-
-            # Processa os parâmetros
-            params = {}
-            if parametros:
-                try:
-                    params = json.loads(parametros)
-                except json.JSONDecodeError:
-                    print("❌ Erro: Parâmetros inválidos. Deve ser um JSON válido.")
-                    return
-
-            # Executa a chamada
-            resultado = cliente.tool_call(ferramenta, metodo, params)
-
-            if "error" in resultado:
-                print(f"❌ Erro ao executar ferramenta: {resultado['error']}")
-                return
-
-            print("✅ Resultado da chamada:")
-            if isinstance(resultado, dict) and "content" in resultado:
-                content = resultado.get("content", [])
-                if content and isinstance(content, list) and len(content) > 0:
-                    text = content[0].get("text", "")
-                    try:
-                        # Tenta parsear o texto como JSON
-                        data = json.loads(text)
-                        print(json.dumps(data, indent=2, ensure_ascii=False))
-                    except:
-                        # Se não for JSON, imprime como texto
-                        print(text)
-                else:
-                    print(json.dumps(resultado, indent=2, ensure_ascii=False))
-            else:
-                print(json.dumps(resultado, indent=2, ensure_ascii=False))
-
-        else:
-            print("ℹ️ Comandos disponíveis:")
-            print("  arcee veyrax tools - Lista as ferramentas disponíveis")
-            print(
-                '  arcee veyrax call veyrax save_memory --parametros \'{"memory": "conteúdo", "tool": "nome_ferramenta"}\' - Salva uma memória'
-            )
-            print(
-                '  arcee veyrax call veyrax get_memory --parametros \'{"tool": "nome_ferramenta", "limit": 10, "offset": 0}\' - Lista memórias com filtro'
-            )
-            print(
-                '  arcee veyrax call veyrax update_memory --parametros \'{"id": "id_memoria", "memory": "novo_conteudo", "tool": "nome_ferramenta"}\' - Atualiza uma memória'
-            )
-            print(
-                '  arcee veyrax call veyrax delete_memory --parametros \'{"id": "id_memoria"}\' - Deleta uma memória'
-            )
+        print("✅ Resultado da chamada:")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
 
     except Exception as e:
-        print(f"❌ Erro ao executar comando: {str(e)}")
+        print(f"❌ Erro ao executar comando: {e}")
+        raise typer.Exit(1)
 
 
 def get_provider():

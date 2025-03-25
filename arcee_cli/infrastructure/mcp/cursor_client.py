@@ -18,10 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 class CursorClient:
-    """Cliente que implementa a interface do Cursor"""
+    """Cliente para comunicação com o MCP"""
 
     def __init__(self):
-        """Inicializa o cliente Cursor"""
+        """Inicializa o cliente"""
+        self.logger = logging.getLogger(__name__)
+        # Obtém a porta do ambiente ou usa 8082 como padrão
+        self.port = os.environ.get("MCP_PORT", "8082")
+        self.base_url = f"http://localhost:{self.port}"
+
         load_dotenv()
 
         # Tenta obter a chave API

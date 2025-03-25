@@ -188,67 +188,24 @@ async def tool_call(request: ToolCallRequest) -> Dict[str, Any]:
         context = app.state.context
 
         # Faz a requisição direta para a API do VeyraX
-        veyrax_url = "https://api.veyrax.arcee.ai/v1"
+        veyrax_url = "https://server.smithery.ai/@VeyraX/veyrax-mcp/tool_call"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {context['api_key']}",
             "User-Agent": "Arcee-CLI/1.0",
         }
 
-        if request.tool == "veyrax":
-            # Monta a URL com base no método
-            if request.method == "get_memory":
-                endpoint = f"{veyrax_url}/memories"
-                params = request.parameters or {}
-                response = requests.get(endpoint, headers=headers, params=params)
-            elif request.method == "save_memory":
-                endpoint = f"{veyrax_url}/memories"
-                data = request.parameters or {}
-                response = requests.post(endpoint, headers=headers, json=data)
-            elif request.method == "update_memory":
-                memory_id = request.parameters.get("id")
-                if not memory_id:
-                    raise HTTPException(
-                        status_code=400, detail="ID da memória é obrigatório"
-                    )
-                endpoint = f"{veyrax_url}/memories/{memory_id}"
-                data = {
-                    "memory": request.parameters.get("memory"),
-                    "tool": request.parameters.get("tool"),
-                }
-                response = requests.put(endpoint, headers=headers, json=data)
-            elif request.method == "delete_memory":
-                memory_id = request.parameters.get("id")
-                if not memory_id:
-                    raise HTTPException(
-                        status_code=400, detail="ID da memória é obrigatório"
-                    )
-                endpoint = f"{veyrax_url}/memories/{memory_id}"
-                response = requests.delete(endpoint, headers=headers)
-            else:
-                raise HTTPException(
-                    status_code=400, detail=f"Método {request.method} não suportado"
-                )
+        # Monta o payload com base no método
+        payload = {
+            "tool": request.tool,
+            "method": request.method,
+            "parameters": request.parameters or {},
+        }
 
-            response.raise_for_status()
-            return response.json()
-
-        elif request.tool == "cursor_agent":
-            if request.method == "query":
-                endpoint = f"{veyrax_url}/cursor/query"
-                data = request.parameters or {}
-                response = requests.post(endpoint, headers=headers, json=data)
-                response.raise_for_status()
-                return response.json()
-            else:
-                raise HTTPException(
-                    status_code=400, detail=f"Método {request.method} não suportado"
-                )
-
-        else:
-            raise HTTPException(
-                status_code=400, detail=f"Ferramenta {request.tool} não suportada"
-            )
+        # Faz a requisição
+        response = requests.post(veyrax_url, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
 
     except requests.exceptions.RequestException as e:
         logger.error(f"Erro na requisição: {e}")
