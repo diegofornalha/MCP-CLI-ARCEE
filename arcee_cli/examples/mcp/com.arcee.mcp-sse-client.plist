@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.arcee.mcp-sse-client</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/caminho/para/seu/venv/bin/python</string>
+        <string>/caminho/para/seu/projeto/arcee_cli/examples/mcp/mcp_sse_app.py</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MCP_SSE_URL</key>
+        <string>sua_url_do_sse_aqui</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>/caminho/para/seu/projeto</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/caminho/para/seu/projeto/logs/mcp_sse_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/caminho/para/seu/projeto/logs/mcp_sse_stderr.log</string>
+</dict>
+</plist> 

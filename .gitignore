@@ -295,3 +295,8 @@ uv.lock
 .pdm-build/
 *.egg-info/
 __pycache__/
+
+# Arquivos de ambiente com credenciais
+.env
+.env.local
+.env.*.local

@@ -20,6 +20,9 @@ import signal
 import sys
 import logging
 import shutil
+from datetime import datetime
+import requests
+import re
 
 from arcee_cli.infrastructure.logging_config import configurar_logging, obter_logger, LOG_DIR, LOG_FILE
 from arcee_cli.infrastructure.providers.arcee_provider import ArceeProvider
@@ -38,7 +41,6 @@ try:
     logger.info("Módulo crewAI carregado com sucesso")
 except ImportError:
     CREW_AVAILABLE = False
-    logger.warning("Módulo crewAI não está disponível, funcionalidades de crew desativadas")
 
 # Importação da versão simplificada do MCP.run
 try:
@@ -89,6 +91,16 @@ crew_app = typer.Typer(
     """
 )
 app.add_typer(crew_app, name="crew")
+
+# Cria um grupo de comandos para Trello
+trello_app = typer.Typer(
+    help="""
+    📋 Gerenciamento de Trello
+
+    Comandos para gerenciar quadros e cards do Trello.
+    """
+)
+app.add_typer(trello_app, name="trello")
 
 console = Console()
 
@@ -145,16 +157,40 @@ def get_crew():
 def chat():
     """Inicia um chat com o Arcee AI"""
     logger.info("Iniciando chat com Arcee AI")
+    
+    # Inicializa o processador do Trello
+    try:
+        from arcee_cli.tools.trello_nl_processor import TrelloNLProcessor
+        trello_processor = TrelloNLProcessor(agent=get_agent())
+        TRELLO_NL_AVAILABLE = True
+        logger.info("Processador de linguagem natural do Trello carregado")
+        
+        # Mensagem de boas-vindas com informação sobre o Trello
+        welcome_message = "🤖 Chat com Arcee AI\n\n" + \
+                         "💡 Você pode usar linguagem natural para interagir com o Trello:\n" + \
+                         "   - 'Mostrar listas do Trello'\n" + \
+                         "   - 'Criar uma lista chamada Tarefas Importantes'\n" + \
+                         "   - 'Mostrar cards da lista Tarefas'\n" + \
+                         "   - 'Criar card Estudar Python na lista Tarefas'\n\n" + \
+                         "Digite 'sair' para encerrar."
+    except Exception as e:
+        logger.error(f"Erro ao carregar processador de linguagem natural do Trello: {e}")
+        TRELLO_NL_AVAILABLE = False
+        trello_processor = None
+        
+        # Mensagem de boas-vindas padrão
+        welcome_message = "🤖 Chat com Arcee AI\n\nDigite 'sair' para encerrar."
+    
     print(
         Panel(
-            "🤖 Chat com Arcee AI\n\nDigite 'sair' para encerrar.",
+            welcome_message,
             title="Arcee AI",
         )
     )
 
     provider = get_provider()
     messages = []
-
+    
     while True:
         try:
             user_input = Prompt.ask("\nVocê")
@@ -165,7 +201,47 @@ def chat():
 
             logger.debug(f"Mensagem do usuário: {user_input}")
             messages.append({"role": "user", "content": user_input})
-            response = provider.generate_content_chat(messages)
+            
+            # Verifica se é um comando do Trello
+            trello_response = None
+            is_trello_cmd = False
+            cmd_type = None
+            
+            if TRELLO_NL_AVAILABLE and trello_processor:
+                is_trello_cmd, cmd_type, cmd_params = trello_processor.detectar_comando(user_input)
+                if is_trello_cmd and cmd_type is not None:
+                    logger.info(f"Detectado comando do Trello: {cmd_type}")
+                    trello_response = trello_processor.processar_comando(cmd_type, cmd_params)
+            
+            # Se foi processado como comando do Trello e temos uma resposta, exibe a resposta
+            if trello_response:
+                # Adiciona a resposta ao histórico
+                messages.append({"role": "assistant", "content": trello_response})
+                print(f"\nAssistente: {trello_response}")
+                continue
+            
+            # Se é sobre Trello mas não é um comando específico ou foi um comando não reconhecido
+            if is_trello_cmd and not trello_response:
+                # Criar uma versão modificada da mensagem para o modelo
+                # para que ele saiba que é sobre Trello mas não é um comando reconhecido
+                trello_context_message = {
+                    "role": "system", 
+                    "content": "O usuário está perguntando sobre o Trello, mas não usou um comando específico reconhecido. " + 
+                              "Por favor, responda de forma conversacional e informativa sobre a funcionalidade do Trello, " +
+                              "orientando como usar os comandos disponíveis: " +
+                              "'mostrar quadros', 'mostrar listas', 'listar listas do quadro com id [ID]', " +
+                              "'criar lista', 'criar card', 'criar quadro', 'apagar quadro', etc."
+                }
+                
+                # Cria uma cópia dos messages para não modificar a lista original
+                enhanced_messages = messages.copy()
+                enhanced_messages.insert(-1, trello_context_message)  # Insere antes da última mensagem do usuário
+                
+                # Processa com o contexto adicional
+                response = provider.generate_content_chat(enhanced_messages)
+            else:
+                # Se não é sobre Trello, processa normalmente
+                response = provider.generate_content_chat(messages)
 
             if "error" in response:
                 logger.error(f"Erro na resposta: {response['error']}")
@@ -720,7 +796,705 @@ def testar_logs():
     print("💡 Use 'arcee logs ver' para visualizar as mensagens no arquivo de log")
 
 
-if __name__ == "__main__":
+@trello_app.command("iniciar")
+def iniciar_servidor_trello(
+    background: bool = typer.Option(False, "--background", "-b", help="Iniciar em segundo plano"),
+    board_id: Optional[str] = typer.Option(None, "--board", help="ID do quadro Trello a ser usado")
+):
+    """Inicia o servidor Trello localmente"""
+    logger.info(f"Iniciando servidor Trello (background={background}, board_id={board_id})")
+    
+    # Determina o diretório raiz do projeto
+    projeto_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    scripts_dir = os.path.join(projeto_dir, "arcee_cli", "scripts")
+    
+    if background:
+        script_path = os.path.join(scripts_dir, "start_trello_server_background.sh")
+    else:
+        script_path = os.path.join(scripts_dir, "start_trello_server.sh")
+    
+    print(f"🚀 Iniciando servidor Trello {'em segundo plano' if background else ''}...")
+    
+    try:
+        # Adiciona o board_id como argumento se fornecido
+        cmd = ["bash", script_path]
+        if board_id:
+            cmd.append(board_id)
+            print(f"📋 Usando quadro com ID: {board_id}")
+            
+        if background:
+            # Em segundo plano, apenas executa o script
+            subprocess.run(
+                cmd,
+                check=True,
+                text=True
+            )
+        else:
+            # Em primeiro plano, executa o processo diretamente
+            os.execv("/bin/bash", ["bash"] + cmd[1:])
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Erro ao iniciar servidor Trello: {e}")
+        logger.error(f"Erro ao iniciar servidor Trello: {e}")
+    except Exception as e:
+        print(f"❌ Erro ao iniciar servidor Trello: {e}")
+        logger.exception(f"Erro ao iniciar servidor Trello: {e}")
+
+@trello_app.command("listar-listas")
+def listar_listas_trello():
+    """Lista todas as listas do quadro Trello"""
+    logger.info("Listando listas do Trello")
+    
+    import requests
+    
+    # Verifica as credenciais
+    api_key = os.getenv("TRELLO_API_KEY")
+    token = os.getenv("TRELLO_TOKEN")
+    board_id = os.getenv("TRELLO_BOARD_ID")
+    
+    if not api_key or not token:
+        print("❌ Erro: Credenciais do Trello não encontradas")
+        print("Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos no arquivo .env")
+        return
+        
+    if not board_id:
+        print("❌ Erro: ID do quadro Trello não encontrado")
+        print("Verifique se TRELLO_BOARD_ID está definido no arquivo .env")
+        return
+    
+    try:
+        # Parâmetros da requisição
+        params = {
+            "key": api_key,
+            "token": token
+        }
+        
+        print(f"🔄 Obtendo listas do quadro {board_id}...")
+        
+        # Faz a requisição para obter as listas
+        response = requests.get(f"https://api.trello.com/1/boards/{board_id}/lists", params=params)
+        response.raise_for_status()
+        
+        listas = response.json()
+        
+        if not listas:
+            print("ℹ️ Nenhuma lista encontrada neste quadro.")
+            return
+            
+        # Exibe as listas em uma tabela
+        table = Table(title="📋 Listas do Trello")
+        table.add_column("ID", style="cyan")
+        table.add_column("Nome", style="green")
+        table.add_column("Posição", style="magenta")
+        
+        for lista in listas:
+            table.add_row(
+                lista.get("id", "N/A"),
+                lista.get("name", "N/A"),
+                str(lista.get("pos", 0))
+            )
+            
+        console.print(table)
+        
+        # Retorna as listas para possível uso em outros comandos
+        return listas
+        
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erro ao listar listas: {str(e)}")
+        if hasattr(e, 'response') and e.response:
+            print(f"Resposta: {e.response.text}")
+        logger.exception(f"Erro ao listar listas do Trello: {e}")
+
+@trello_app.command("listar-cards")
+def listar_cards_trello(
+    lista_id: Optional[str] = typer.Argument(None, help="ID da lista para filtrar os cards")
+):
+    """Lista todos os cards do quadro ou de uma lista específica"""
+    logger.info(f"Listando cards do Trello (lista_id={lista_id})")
+    
+    if not MCPRUN_SIMPLE_AVAILABLE:
+        print("❌ Módulo MCPRunClient não disponível")
+        return
+    
+    # Usa o agente para obter as cards
+    agent = get_agent()
+    try:
+        # Se não tem ID de lista, exibe os cards de todas as listas
+        if not lista_id:
+            # Primeiro obtém as listas
+            listas_response = agent.run_tool("get_lists", {"random_string": "dummy"})
+            
+            if "error" in listas_response:
+                print(f"❌ Erro: {listas_response['error']}")
+                return
+                
+            all_cards = []
+            
+            # Para cada lista, obtém os cards
+            for lista in listas_response.get("lists", []):
+                lista_id = lista.get("id")
+                lista_nome = lista.get("name")
+                
+                cards_response = agent.run_tool("get_cards_by_list_id", {"listId": lista_id})
+                
+                if "error" not in cards_response:
+                    for card in cards_response.get("cards", []):
+                        card["listName"] = lista_nome
+                        all_cards.append(card)
+            
+            # Exibe todos os cards em uma tabela
+            table = Table(title="🗂️ Todos os Cards do Trello")
+            table.add_column("ID", style="cyan")
+            table.add_column("Lista", style="blue")
+            table.add_column("Nome", style="green")
+            table.add_column("Descrição", style="magenta")
+            
+            for card in all_cards:
+                table.add_row(
+                    card.get("id", "N/A"),
+                    card.get("listName", "N/A"),
+                    card.get("name", "N/A"),
+                    card.get("desc", "")[:30] + ("..." if len(card.get("desc", "")) > 30 else "")
+                )
+                
+            console.print(table)
+        else:
+            # Exibe os cards de uma lista específica
+            response = agent.run_tool("get_cards_by_list_id", {"listId": lista_id})
+            
+            if "error" in response:
+                print(f"❌ Erro: {response['error']}")
+                return
+                
+            # Exibe os cards em uma tabela
+            table = Table(title=f"🗂️ Cards da Lista {lista_id}")
+            table.add_column("ID", style="cyan")
+            table.add_column("Nome", style="green")
+            table.add_column("Descrição", style="magenta")
+            
+            for card in response.get("cards", []):
+                table.add_row(
+                    card.get("id", "N/A"),
+                    card.get("name", "N/A"),
+                    card.get("desc", "")[:50] + ("..." if len(card.get("desc", "")) > 50 else "")
+                )
+                
+            console.print(table)
+    except Exception as e:
+        print(f"❌ Erro ao listar cards: {e}")
+        logger.exception(f"Erro ao listar cards do Trello: {e}")
+
+@trello_app.command("criar-lista")
+def criar_lista_trello(
+    nome: str = typer.Argument(..., help="Nome da nova lista")
+):
+    """Cria uma nova lista no quadro Trello"""
+    logger.info(f"Criando lista no Trello: {nome}")
+    
+    if not MCPRUN_SIMPLE_AVAILABLE:
+        print("❌ Módulo MCPRunClient não disponível")
+        return
+    
+    # Usa o agente para criar a lista
+    agent = get_agent()
+    try:
+        response = agent.run_tool("add_list_to_board", {"name": nome})
+        
+        if "error" in response:
+            print(f"❌ Erro: {response['error']}")
+            return
+            
+        print(f"✅ Lista '{nome}' criada com sucesso!")
+        print(f"ID da lista: {response.get('id')}")
+    except Exception as e:
+        print(f"❌ Erro ao criar lista: {e}")
+        logger.exception(f"Erro ao criar lista no Trello: {e}")
+
+@trello_app.command("criar-card")
+def criar_card_trello(
+    lista_id: str = typer.Argument(..., help="ID da lista onde o card será criado"),
+    nome: str = typer.Argument(..., help="Nome do card"),
+    descricao: str = typer.Option("", "--desc", "-d", help="Descrição do card"),
+    data_vencimento: str = typer.Option(None, "--due", help="Data de vencimento (formato ISO 8601, ex: 2023-12-31T23:59:59Z)")
+):
+    """Cria um novo card em uma lista do Trello"""
+    logger.info(f"Criando card no Trello: {nome} (lista_id={lista_id})")
+    
+    import requests
+    
+    # Verifica as credenciais
+    api_key = os.getenv("TRELLO_API_KEY")
+    token = os.getenv("TRELLO_TOKEN")
+    
+    if not api_key or not token:
+        print("❌ Erro: Credenciais do Trello não encontradas")
+        print("Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos no arquivo .env")
+        return
+    
+    try:
+        # Parâmetros da requisição para criar card
+        params = {
+            "key": api_key,
+            "token": token,
+            "idList": lista_id,
+            "name": nome,
+            "desc": descricao
+        }
+        
+        if data_vencimento:
+            params["due"] = data_vencimento
+        
+        print(f"🔄 Criando card '{nome}' na lista {lista_id}...")
+        
+        # Faz a requisição para criar o card
+        response = requests.post("https://api.trello.com/1/cards", params=params)
+        response.raise_for_status()
+        
+        card_data = response.json()
+        print(f"✅ Card criado com sucesso!")
+        print(f"ID do card: {card_data['id']}")
+        print(f"URL do card: {card_data['url']}")
+        
+        return card_data
+        
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erro ao criar card: {str(e)}")
+        if hasattr(e, 'response') and e.response:
+            print(f"Resposta: {e.response.text}")
+        logger.exception(f"Erro ao criar card no Trello: {e}")
+
+@trello_app.command("arquivar-card")
+def arquivar_card_trello(
+    card_id: str = typer.Argument(..., help="ID do card a ser arquivado")
+):
+    """Arquiva um card do Trello"""
+    logger.info(f"Arquivando card do Trello: {card_id}")
+    
+    if not MCPRUN_SIMPLE_AVAILABLE:
+        print("❌ Módulo MCPRunClient não disponível")
+        return
+    
+    # Usa o agente para arquivar o card
+    agent = get_agent()
+    try:
+        response = agent.run_tool("archive_card", {"cardId": card_id})
+        
+        if "error" in response:
+            print(f"❌ Erro: {response['error']}")
+            return
+            
+        print(f"✅ Card {card_id} arquivado com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao arquivar card: {e}")
+        logger.exception(f"Erro ao arquivar card do Trello: {e}")
+
+@trello_app.command("atividade")
+def listar_atividade_trello(
+    limite: int = typer.Option(10, "--limite", "-l", help="Número de atividades a serem exibidas")
+):
+    """Lista as atividades recentes no quadro Trello"""
+    logger.info(f"Listando atividades do Trello (limite={limite})")
+    
+    if not MCPRUN_SIMPLE_AVAILABLE:
+        print("❌ Módulo MCPRunClient não disponível")
+        return
+    
+    # Usa o agente para obter as atividades
+    agent = get_agent()
+    try:
+        response = agent.run_tool("get_recent_activity", {"limit": limite})
+        
+        if "error" in response:
+            print(f"❌ Erro: {response['error']}")
+            return
+            
+        # Exibe as atividades em uma tabela
+        table = Table(title="🔄 Atividades Recentes do Trello")
+        table.add_column("Data", style="cyan")
+        table.add_column("Usuário", style="blue")
+        table.add_column("Ação", style="green")
+        
+        for atividade in response.get("activities", []):
+            date_str = atividade.get("date", "")
+            # Formata a data se disponível
+            if date_str:
+                try:
+                    date_obj = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                    date_formatted = date_obj.strftime("%d/%m/%Y %H:%M")
+                except:
+                    date_formatted = date_str
+            else:
+                date_formatted = "N/A"
+                
+            table.add_row(
+                date_formatted,
+                atividade.get("memberCreator", {}).get("fullName", "N/A"),
+                atividade.get("data", {}).get("text", atividade.get("type", "N/A"))
+            )
+            
+        console.print(table)
+    except Exception as e:
+        print(f"❌ Erro ao listar atividades: {e}")
+        logger.exception(f"Erro ao listar atividades do Trello: {e}")
+
+@trello_app.command("meus-cards")
+def listar_meus_cards_trello():
+    """Lista todos os cards atribuídos a você"""
+    logger.info("Listando meus cards do Trello")
+    
+    if not MCPRUN_SIMPLE_AVAILABLE:
+        print("❌ Módulo MCPRunClient não disponível")
+        return
+    
+    # Usa o agente para obter os cards
+    agent = get_agent()
+    try:
+        response = agent.run_tool("get_my_cards", {"random_string": "dummy"})
+        
+        if "error" in response:
+            print(f"❌ Erro: {response['error']}")
+            return
+            
+        # Exibe os cards em uma tabela
+        table = Table(title="🗂️ Meus Cards do Trello")
+        table.add_column("ID", style="cyan")
+        table.add_column("Lista", style="blue")
+        table.add_column("Nome", style="green")
+        table.add_column("Data Vencimento", style="magenta")
+        
+        for card in response.get("cards", []):
+            due_date = card.get("due", "")
+            # Formata a data se disponível
+            if due_date:
+                try:
+                    date_obj = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+                    due_formatted = date_obj.strftime("%d/%m/%Y")
+                except:
+                    due_formatted = due_date
+            else:
+                due_formatted = "N/A"
+                
+            table.add_row(
+                card.get("id", "N/A"),
+                card.get("list", {}).get("name", "N/A"),
+                card.get("name", "N/A"),
+                due_formatted
+            )
+            
+        console.print(table)
+    except Exception as e:
+        print(f"❌ Erro ao listar meus cards: {e}")
+        logger.exception(f"Erro ao listar meus cards do Trello: {e}")
+
+@trello_app.command("atualizar-card")
+def atualizar_card_trello(
+    card_id: str = typer.Argument(..., help="ID do card a ser atualizado"),
+    nome: str = typer.Option(None, "--nome", "-n", help="Novo nome para o card"),
+    descricao: str = typer.Option(None, "--desc", "-d", help="Nova descrição para o card"),
+    data_vencimento: str = typer.Option(None, "--due", help="Nova data de vencimento (formato ISO 8601, ex: 2023-12-31T23:59:59Z)")
+):
+    """Atualiza os detalhes de um card existente no Trello"""
+    logger.info(f"Atualizando card no Trello: {card_id}")
+    
+    if not MCPRUN_SIMPLE_AVAILABLE:
+        print("❌ Módulo MCPRunClient não disponível")
+        return
+    
+    if not any([nome, descricao, data_vencimento]):
+        print("❌ Você precisa fornecer pelo menos um campo para atualizar (nome, descrição ou data)")
+        return
+    
+    # Usa o agente para atualizar o card
+    agent = get_agent()
+    try:
+        params = {"cardId": card_id}
+        
+        if nome:
+            params["name"] = nome
+        
+        if descricao:
+            params["description"] = descricao
+            
+        if data_vencimento:
+            params["dueDate"] = data_vencimento
+            
+        response = agent.run_tool("update_card_details", params)
+        
+        if "error" in response:
+            print(f"❌ Erro: {response['error']}")
+            return
+            
+        print(f"✅ Card {card_id} atualizado com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao atualizar card: {e}")
+        logger.exception(f"Erro ao atualizar card no Trello: {e}")
+
+@trello_app.command("arquivar-lista")
+def arquivar_lista_trello(
+    lista_id: str = typer.Argument(..., help="ID da lista a ser arquivada")
+):
+    """Arquiva uma lista do Trello"""
+    logger.info(f"Arquivando lista do Trello: {lista_id}")
+    
+    if not MCPRUN_SIMPLE_AVAILABLE:
+        print("❌ Módulo MCPRunClient não disponível")
+        return
+    
+    # Usa o agente para arquivar a lista
+    agent = get_agent()
+    try:
+        response = agent.run_tool("archive_list", {"listId": lista_id})
+        
+        if "error" in response:
+            print(f"❌ Erro: {response['error']}")
+            return
+            
+        print(f"✅ Lista {lista_id} arquivada com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao arquivar lista: {e}")
+        logger.exception(f"Erro ao arquivar lista do Trello: {e}")
+
+@trello_app.command("criar-quadro")
+def criar_quadro_trello(
+    nome: str = typer.Argument(..., help="Nome do novo quadro"),
+    descricao: str = typer.Option(None, "--desc", "-d", help="Descrição do quadro"),
+    listas_padrao: bool = typer.Option(True, "--listas-padrao/--sem-listas", help="Criar listas padrão (A Fazer, Em Andamento, Concluído)")
+):
+    """Cria um novo quadro no Trello"""
+    logger.info(f"Criando quadro no Trello: {nome}")
+    
+    # Verifica as credenciais
+    api_key = os.getenv("TRELLO_API_KEY")
+    token = os.getenv("TRELLO_TOKEN")
+    
+    if not api_key or not token:
+        print("❌ Erro: Credenciais do Trello não encontradas")
+        print("Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos no arquivo .env")
+        return
+    
+    try:
+        # Parâmetros da requisição para criar quadro
+        params = {
+            "key": api_key,
+            "token": token,
+            "name": nome,
+            "defaultLists": "false"  # Não criar listas padrão automaticamente
+        }
+        
+        if descricao:
+            params["desc"] = descricao
+        
+        print(f"🔄 Criando quadro '{nome}'...")
+        
+        # Faz a requisição para criar o quadro
+        response = requests.post("https://api.trello.com/1/boards/", params=params)
+        response.raise_for_status()
+        
+        board_data = response.json()
+        print(f"✅ Quadro criado com sucesso!")
+        print(f"ID do quadro: {board_data['id']}")
+        print(f"URL do quadro: {board_data['url']}")
+        
+        board_id = board_data['id']
+        
+        # Cria listas padrão se solicitado
+        if listas_padrao:
+            print("\nCriando listas padrão...")
+            listas = ["A Fazer", "Em Andamento", "Concluído"]
+            
+            for lista_nome in listas:
+                lista_params = {
+                    "key": api_key,
+                    "token": token,
+                    "name": lista_nome,
+                    "idBoard": board_id
+                }
+                
+                print(f"🔄 Criando lista '{lista_nome}'...")
+                lista_response = requests.post("https://api.trello.com/1/lists", params=lista_params)
+                lista_response.raise_for_status()
+                
+                lista_data = lista_response.json()
+                print(f"✅ Lista '{lista_nome}' criada com sucesso!")
+                print(f"ID da lista: {lista_data['id']}")
+        
+        # Pergunta se quer utilizar este quadro como padrão
+        usar_como_padrao = typer.confirm("\nDeseja utilizar este quadro como padrão?", default=True)
+        
+        if usar_como_padrao:
+            # Atualiza os arquivos .env com o novo ID do quadro
+            update_env_files(board_id, nome)
+            print(f"\n✅ Arquivos .env atualizados com o novo ID do quadro: {board_id}")
+            print("Para usar este quadro, reinicie o servidor Trello com o comando:")
+            print("  arcee trello iniciar --background")
+        else:
+            print(f"\nPara usar este quadro posteriormente, você pode iniciar o servidor com:")
+            print(f"  arcee trello iniciar --board {board_id}")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erro ao criar quadro: {str(e)}")
+        if hasattr(e, 'response') and e.response:
+            print(f"Resposta: {e.response.text}")
+
+def update_env_files(board_id, board_name):
+    """Atualiza os arquivos .env com o novo ID do quadro"""
+    # Caminho para o arquivo .env principal
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    
+    # Caminho para o arquivo .env do servidor Trello
+    trello_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp-server-trello", ".env")
+    
+    # Atualiza o arquivo .env principal
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        # Substitui o ID do quadro
+        content = re.sub(r"TRELLO_BOARD_ID=.*", f"TRELLO_BOARD_ID={board_id}", content)
+        content = re.sub(r"TRELLO_BOARD_NAME=.*", f"TRELLO_BOARD_NAME={board_name}", content)
+        
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    
+    # Atualiza o arquivo .env do servidor Trello
+    if os.path.exists(trello_env_path):
+        with open(trello_env_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        # Substitui o ID do quadro
+        content = re.sub(r"TRELLO_BOARD_ID=.*", f"TRELLO_BOARD_ID={board_id}", content)
+        
+        with open(trello_env_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+@trello_app.command("apagar-quadro")
+def apagar_quadro_trello(
+    quadro_id_ou_url: str = typer.Argument(..., help="ID do quadro ou URL completa do Trello"),
+    confirmar: bool = typer.Option(False, "--sim", "-s", help="Confirmar exclusão sem perguntar")
+):
+    """Apaga um quadro do Trello permanentemente (cuidado: esta ação não pode ser desfeita)"""
+    logger.info(f"Tentando apagar quadro do Trello: {quadro_id_ou_url}")
+    
+    import requests
+    import re
+    
+    # Verifica se é uma URL ou um ID direto
+    if quadro_id_ou_url.startswith("http"):
+        # Extrai o ID da URL
+        match = re.search(r'trello\.com/b/([^/]+)', quadro_id_ou_url)
+        if match:
+            quadro_id = match.group(1)
+        else:
+            print("❌ URL inválida. Formato esperado: https://trello.com/b/BOARD_ID/...")
+            return
+    else:
+        quadro_id = quadro_id_ou_url
+    
+    # Verifica as credenciais
+    api_key = os.getenv("TRELLO_API_KEY")
+    token = os.getenv("TRELLO_TOKEN")
+    
+    if not api_key or not token:
+        print("❌ Erro: Credenciais do Trello não encontradas")
+        print("Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos no arquivo .env")
+        return
+    
+    # Obtém informações do quadro para mostrar ao usuário
+    try:
+        info_params = {
+            "key": api_key,
+            "token": token
+        }
+        
+        # Verifica se o quadro existe e obtém informações
+        info_response = requests.get(f"https://api.trello.com/1/boards/{quadro_id}", params=info_params)
+        info_response.raise_for_status()
+        
+        board_info = info_response.json()
+        board_name = board_info.get('name', 'Quadro sem nome')
+        
+        print(f"📋 Quadro encontrado: {board_name} (ID: {quadro_id})")
+        
+        # Confirma a exclusão
+        if not confirmar:
+            confirmacao = typer.confirm(f"⚠️ ATENÇÃO: Tem certeza que deseja APAGAR PERMANENTEMENTE o quadro '{board_name}'?")
+            if not confirmacao:
+                print("Operação cancelada pelo usuário.")
+                return
+        
+        # Parâmetros da requisição para apagar o quadro
+        params = {
+            "key": api_key,
+            "token": token
+        }
+        
+        print(f"🔄 Apagando quadro '{board_name}'...")
+        
+        # Faz a requisição para apagar o quadro
+        response = requests.delete(f"https://api.trello.com/1/boards/{quadro_id}", params=params)
+        response.raise_for_status()
+        
+        print(f"✅ Quadro '{board_name}' apagado com sucesso!")
+        
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erro ao apagar quadro: {str(e)}")
+        if hasattr(e, 'response') and e.response:
+            print(f"Resposta: {e.response.text}")
+        logger.exception(f"Erro ao apagar quadro do Trello: {e}")
+
+@trello_app.command("listar-quadros")
+def listar_quadros_trello():
+    """Lista todos os quadros do usuário no Trello"""
+    # Obtém as credenciais diretamente do ambiente
+    api_key = os.getenv("TRELLO_API_KEY")
+    token = os.getenv("TRELLO_TOKEN")
+    
+    if not api_key or not token:
+        print("❌ Credenciais do Trello não encontradas.")
+        print("Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos no arquivo .env")
+        return
+    
+    try:
+        # Parâmetros da requisição
+        params = {
+            "key": api_key,
+            "token": token,
+            "filter": "open"  # Apenas quadros abertos
+        }
+        
+        # Faz a requisição para obter os quadros
+        response = requests.get("https://api.trello.com/1/members/me/boards", params=params)
+        response.raise_for_status()
+        
+        quadros = response.json()
+        
+        if not quadros:
+            print("ℹ️ Nenhum quadro encontrado.")
+            return
+            
+        # Imprime os quadros encontrados
+        print(f"📋 Quadros do Trello ({len(quadros)} encontrados):\n")
+        
+        for quadro in quadros:
+            nome = quadro.get('name', 'N/A')
+            id_quadro = quadro.get('id', 'N/A')
+            url = quadro.get('shortUrl', 'N/A')
+            desc = quadro.get('desc', '')
+            
+            print(f"• {nome}")
+            print(f"  ID: {id_quadro}")
+            print(f"  URL: {url}")
+            if desc:
+                print(f"  Descrição: {desc}")
+            print("")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erro ao listar quadros: {str(e)}")
+        if hasattr(e, 'response') and e.response:
+            print(f"Resposta: {e.response.text}")
+
+# Função principal
+def main():
+    # Esta função é chamada ao executar o script diretamente
     try:
         # Carrega a configuração MCP.run
         config_file = os.path.expanduser("~/.arcee/config.json")
@@ -728,6 +1502,7 @@ if __name__ == "__main__":
             try:
                 with open(config_file, "r", encoding="utf-8") as f:
                     config = json.load(f)
+                    global _mcp_session_id
                     _mcp_session_id = config.get("mcp_session_id")
                     if _mcp_session_id:
                         logger.info(f"ID de sessão MCP.run carregado: {_mcp_session_id}")
@@ -739,3 +1514,6 @@ if __name__ == "__main__":
         logger.info("Programa encerrado pelo usuário via KeyboardInterrupt")
         print("\n👋 Programa encerrado pelo usuário")
         sys.exit(0)
+
+if __name__ == "__main__":
+    main()

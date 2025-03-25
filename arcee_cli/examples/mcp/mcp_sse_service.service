@@ -1,0 +1,19 @@
+[Unit]
+Description=MCP.run SSE Client Service
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/caminho/para/seu/projeto
+# Substitua pelo caminho correto para seu ambiente Python virtual
+ExecStart=/caminho/para/seu/venv/bin/python arcee_cli/examples/mcp/mcp_sse_app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=MCP_SSE_URL=sua_url_do_sse_aqui
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target 

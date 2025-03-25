@@ -51,7 +51,7 @@ class ArceeProvider:
         # Mensagem do sistema solicitando respostas em português
         self.system_message = {
             "role": "system",
-            "content": "Você deve sempre responder em português do Brasil. Use uma linguagem natural e informal, mas profissional. Suas respostas devem ser claras, objetivas e culturalmente adequadas para o Brasil.",
+            "content": "Você deve sempre responder em português do Brasil. Use uma linguagem natural e informal, mas profissional. Suas respostas devem ser claras, objetivas e culturalmente adequadas para o Brasil. Quando o usuário fizer perguntas sobre o Trello, incentive-o a usar os comandos em linguagem natural como 'mostrar listas', 'criar card', etc.",
         }
 
         # Configura o cliente OpenAI

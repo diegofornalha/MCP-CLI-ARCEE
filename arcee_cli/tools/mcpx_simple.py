@@ -9,10 +9,62 @@ import subprocess
 import json
 import logging
 import os
-from typing import Dict, Any, List, Optional
+import threading
+import queue
+import time
+from typing import Dict, Any, List, Optional, Callable
 
 # Configuração de logging
 logger = logging.getLogger("mcpx_simple")
+
+def run_command_with_timeout(cmd: str, timeout: int = 15) -> Dict[str, Any]:
+    """
+    Executa um comando com timeout usando threads
+    
+    Args:
+        cmd: Comando a ser executado
+        timeout: Tempo máximo de execução em segundos
+        
+    Returns:
+        Resultado da execução
+    """
+    result_queue = queue.Queue()
+    
+    def target():
+        try:
+            process = subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            stdout, stderr = process.communicate()
+            
+            result_queue.put({
+                "returncode": process.returncode,
+                "stdout": stdout,
+                "stderr": stderr
+            })
+        except Exception as e:
+            result_queue.put({"error": str(e)})
+    
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    thread.start()
+    
+    try:
+        result = result_queue.get(timeout=timeout)
+        if "error" in result:
+            return {"error": result["error"]}
+        
+        if result["returncode"] != 0:
+            return {"error": f"Comando falhou com código {result['returncode']}", "stderr": result["stderr"]}
+        
+        return {"stdout": result["stdout"], "stderr": result["stderr"]}
+    except queue.Empty:
+        return {"error": f"Timeout: o comando excedeu {timeout} segundos", "command": cmd}
 
 class MCPRunClient:
     """Cliente simplificado para MCP.run"""
@@ -45,19 +97,19 @@ class MCPRunClient:
                 
             logger.debug(f"Executando comando: {cmd}")
             
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                check=True,
-                text=True,
-                capture_output=True
-            )
+            result = run_command_with_timeout(cmd)
+            
+            if "error" in result:
+                logger.error(f"Erro ao executar comando: {result['error']}")
+                return []
             
             # Tenta extrair a saída JSON
             tools = []
             try:
                 # A saída pode conter texto antes do JSON
-                output = result.stdout
+                output = result["stdout"]
+                logger.debug(f"Output bruto do comando: {output[:200]}...")
+                
                 # Encontra o início do JSON (primeiro '{')
                 json_start = output.find('{')
                 if json_start >= 0:
@@ -67,6 +119,10 @@ class MCPRunClient:
                     # Extrai as ferramentas
                     if isinstance(data, dict) and "tools" in data:
                         tools = []
+                        
+                        # Log detalhado das ferramentas disponíveis
+                        logger.debug(f"Ferramentas disponíveis: {list(data['tools'].keys())}")
+                        
                         for name, info in data["tools"].items():
                             tools.append({
                                 "name": name,
@@ -78,14 +134,9 @@ class MCPRunClient:
                 self._tools_cache = tools
                 return tools
             except json.JSONDecodeError:
-                logger.error(f"Erro ao decodificar saída JSON: {result.stdout}")
+                logger.error(f"Erro ao decodificar saída JSON: {output}")
                 return []
                 
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Erro ao executar comando: {e}")
-            logger.error(f"STDOUT: {e.stdout}")
-            logger.error(f"STDERR: {e.stderr}")
-            return []
         except Exception as e:
             logger.exception(f"Erro ao obter ferramentas: {e}")
             return []
@@ -117,18 +168,16 @@ class MCPRunClient:
             logger.debug(f"Executando ferramenta: {tool_name} com parâmetros: {params}")
             logger.debug(f"Comando: {cmd}")
             
-            # Executa o comando
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                check=True,
-                text=True,
-                capture_output=True
-            )
+            # Executa o comando com nossa função personalizada de timeout
+            result = run_command_with_timeout(cmd, timeout=20)
+            
+            if "error" in result:
+                logger.error(f"Erro na execução do comando: {result['error']}")
+                return {"error": result["error"]}
             
             # Tenta extrair a saída JSON
             try:
-                output = result.stdout
+                output = result["stdout"]
                 # Encontra o início do JSON (primeiro '{')
                 json_start = output.find('{')
                 if json_start >= 0:
@@ -139,14 +188,9 @@ class MCPRunClient:
                 logger.warning(f"Não foi possível encontrar JSON na saída: {output}")
                 return {"error": "Saída não é um JSON válido", "raw_output": output}
             except json.JSONDecodeError:
-                logger.error(f"Erro ao decodificar saída JSON: {result.stdout}")
-                return {"error": "Erro ao decodificar JSON", "raw_output": result.stdout}
+                logger.error(f"Erro ao decodificar saída JSON: {result['stdout']}")
+                return {"error": "Erro ao decodificar JSON", "raw_output": result["stdout"]}
                 
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Erro ao executar ferramenta: {e}")
-            logger.error(f"STDOUT: {e.stdout}")
-            logger.error(f"STDERR: {e.stderr}")
-            return {"error": str(e), "stderr": e.stderr}
         except Exception as e:
             logger.exception(f"Erro ao executar ferramenta: {e}")
             return {"error": str(e)}
