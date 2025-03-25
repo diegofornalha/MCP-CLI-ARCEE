@@ -915,82 +915,75 @@ def listar_listas_trello():
 
 @trello_app.command("listar-cards")
 def listar_cards_trello(
-    lista_id: Optional[str] = typer.Argument(None, help="ID da lista para filtrar os cards")
+    lista_id: str = typer.Argument(..., help="ID da lista cujos cards serão listados")
 ):
-    """Lista todos os cards do quadro ou de uma lista específica"""
-    logger.info(f"Listando cards do Trello (lista_id={lista_id})")
-    
-    if not MCPRUN_SIMPLE_AVAILABLE:
-        print("❌ Módulo MCPRunClient não disponível")
-        return
-    
-    # Usa o agente para obter as cards
-    agent = get_agent()
+    """Lista todos os cards de uma lista específica do Trello"""
     try:
-        # Se não tem ID de lista, exibe os cards de todas as listas
-        if not lista_id:
-            # Primeiro obtém as listas
-            listas_response = agent.run_tool("get_lists", {"random_string": "dummy"})
+        api_key = os.getenv("TRELLO_API_KEY")
+        token = os.getenv("TRELLO_TOKEN")
+        
+        if not api_key or not token:
+            typer.echo("❌ Credenciais do Trello não encontradas.")
+            typer.echo("Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos no arquivo .env")
+            raise typer.Exit(code=1)
+        
+        # Parâmetros para a requisição
+        params = {
+            "key": api_key,
+            "token": token
+        }
+        
+        # Faz a requisição direta para obter os cards da lista
+        url = f"https://api.trello.com/1/lists/{lista_id}/cards"
+        
+        typer.echo(f"🔍 Buscando cards na lista {lista_id}...")
+        
+        response = requests.get(url, params=params)
+        
+        if response.status_code != 200:
+            typer.echo(f"❌ Erro ao obter cards da lista: {response.status_code}")
+            typer.echo(f"Resposta: {response.text}")
+            raise typer.Exit(code=1)
             
-            if "error" in listas_response:
-                print(f"❌ Erro: {listas_response['error']}")
-                return
-                
-            all_cards = []
+        cards = response.json()
+        
+        if not cards:
+            typer.echo("ℹ️ Nenhum card encontrado nesta lista.")
+            return
             
-            # Para cada lista, obtém os cards
-            for lista in listas_response.get("lists", []):
-                lista_id = lista.get("id")
-                lista_nome = lista.get("name")
-                
-                cards_response = agent.run_tool("get_cards_by_list_id", {"listId": lista_id})
-                
-                if "error" not in cards_response:
-                    for card in cards_response.get("cards", []):
-                        card["listName"] = lista_nome
-                        all_cards.append(card)
+        # Obter informações da lista para mostrar o nome
+        lista_url = f"https://api.trello.com/1/lists/{lista_id}"
+        lista_response = requests.get(lista_url, params=params)
+        
+        lista_nome = "Lista desconhecida"
+        if lista_response.status_code == 200:
+            lista_info = lista_response.json()
+            lista_nome = lista_info.get("name", "Lista desconhecida")
+        
+        typer.echo(f"📋 Cards na lista '{lista_nome}' ({len(cards)} encontrados):\n")
+        
+        for i, card in enumerate(cards, 1):
+            nome = card.get("name", "Sem nome")
+            desc = card.get("desc", "")
+            url = card.get("shortUrl", "")
+            card_id = card.get("id", "")
             
-            # Exibe todos os cards em uma tabela
-            table = Table(title="🗂️ Todos os Cards do Trello")
-            table.add_column("ID", style="cyan")
-            table.add_column("Lista", style="blue")
-            table.add_column("Nome", style="green")
-            table.add_column("Descrição", style="magenta")
+            typer.echo(f"{i}. {nome}")
+            typer.echo(f"   ID: {card_id}")
+            if url:
+                typer.echo(f"   URL: {url}")
+            if desc:
+                # Limita a descrição a 100 caracteres para não sobrecarregar o terminal
+                desc_preview = desc[:100] + "..." if len(desc) > 100 else desc
+                typer.echo(f"   Descrição: {desc_preview}")
+            typer.echo("")
             
-            for card in all_cards:
-                table.add_row(
-                    card.get("id", "N/A"),
-                    card.get("listName", "N/A"),
-                    card.get("name", "N/A"),
-                    card.get("desc", "")[:30] + ("..." if len(card.get("desc", "")) > 30 else "")
-                )
-                
-            console.print(table)
-        else:
-            # Exibe os cards de uma lista específica
-            response = agent.run_tool("get_cards_by_list_id", {"listId": lista_id})
-            
-            if "error" in response:
-                print(f"❌ Erro: {response['error']}")
-                return
-                
-            # Exibe os cards em uma tabela
-            table = Table(title=f"🗂️ Cards da Lista {lista_id}")
-            table.add_column("ID", style="cyan")
-            table.add_column("Nome", style="green")
-            table.add_column("Descrição", style="magenta")
-            
-            for card in response.get("cards", []):
-                table.add_row(
-                    card.get("id", "N/A"),
-                    card.get("name", "N/A"),
-                    card.get("desc", "")[:50] + ("..." if len(card.get("desc", "")) > 50 else "")
-                )
-                
-            console.print(table)
+    except requests.exceptions.RequestException as e:
+        typer.echo(f"❌ Erro na requisição: {str(e)}")
+        raise typer.Exit(code=1)
     except Exception as e:
-        print(f"❌ Erro ao listar cards: {e}")
-        logger.exception(f"Erro ao listar cards do Trello: {e}")
+        typer.echo(f"❌ Erro ao listar cards: {str(e)}")
+        raise typer.Exit(code=1)
 
 @trello_app.command("criar-lista")
 def criar_lista_trello(

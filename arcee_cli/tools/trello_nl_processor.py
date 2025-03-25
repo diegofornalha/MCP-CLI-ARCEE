@@ -426,82 +426,130 @@ class TrelloNLProcessor:
     
     def _comando_listar_cards(self, params: Dict[str, Any]) -> str:
         """Processa o comando para listar cards"""
-        if not self.agent:
-            return "❌ Agente não disponível para processar comandos do Trello"
-            
+        import requests
+        import os
+        
         lista_nome = params.get('lista_nome')
-        lista_id = None
+        lista_id = params.get('lista_id')
         
-        # Se temos um nome de lista, precisamos obter o ID
-        if lista_nome:
-            listas_response = self.agent.run_tool("get_lists", {"random_string": "dummy"})
-            
-            if "error" in listas_response:
-                return f"❌ Erro: {listas_response['error']}"
-                
-            # Procura a lista pelo nome
-            for lista in listas_response.get("lists", []):
-                if lista_nome.lower() in lista.get('name', '').lower():
-                    lista_id = lista.get('id')
-                    lista_nome_completo = lista.get('name')
-                    break
-            
-            if not lista_id:
-                return f"❌ Lista '{lista_nome}' não encontrada. Verifique o nome e tente novamente."
+        # Obtém as credenciais do Trello
+        api_key = os.getenv("TRELLO_API_KEY")
+        token = os.getenv("TRELLO_TOKEN")
         
-        # Se temos um ID de lista, obtém os cards dessa lista
-        if lista_id:
-            response = self.agent.run_tool("get_cards_by_list_id", {"listId": lista_id})
-            
-            if "error" in response:
-                return f"❌ Erro: {response['error']}"
-                
-            # Formata os cards em texto
-            result = f"🗂️ Cards da Lista '{lista_nome_completo}':\n\n"
-            
-            for card in response.get("cards", []):
-                result += f"• {card.get('name', 'N/A')} (ID: {card.get('id', 'N/A')})\n"
-                if card.get('desc'):
-                    result += f"  Descrição: {card.get('desc')[:50]}" + ("..." if len(card.get('desc', '')) > 50 else "") + "\n"
-                result += "\n"
-                
-            return result
+        if not api_key or not token:
+            return "❌ Credenciais do Trello não encontradas. Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos."
         
-        # Se não temos ID de lista, obtém todas as listas e seus cards
-        else:
-            listas_response = self.agent.run_tool("get_lists", {"random_string": "dummy"})
-            
-            if "error" in listas_response:
-                return f"❌ Erro: {listas_response['error']}"
+        # Parâmetros comuns para requisições
+        auth_params = {
+            "key": api_key,
+            "token": token
+        }
+        
+        try:
+            # Se temos um ID de lista, usamos diretamente
+            if lista_id:
+                # Obtém informações da lista para mostrar o nome
+                lista_url = f"https://api.trello.com/1/lists/{lista_id}"
+                lista_response = requests.get(lista_url, params=auth_params)
                 
-            # Formata os cards em texto, agrupados por lista
-            result = "🗂️ Todos os Cards do Trello:\n\n"
-            
-            for lista in listas_response.get("lists", []):
-                lista_id = lista.get("id")
-                lista_nome = lista.get("name")
-                
-                # Adiciona cabeçalho da lista
-                result += f"📋 Lista: {lista_nome}\n"
+                lista_nome_exibir = lista_id
+                if lista_response.status_code == 200:
+                    lista_info = lista_response.json()
+                    lista_nome_exibir = lista_info.get("name", lista_id)
                 
                 # Obtém os cards da lista
-                cards_response = self.agent.run_tool("get_cards_by_list_id", {"listId": lista_id})
+                cards_url = f"https://api.trello.com/1/lists/{lista_id}/cards"
+                cards_response = requests.get(cards_url, params=auth_params)
                 
-                if "error" not in cards_response:
-                    cards = cards_response.get("cards", [])
-                    if cards:
-                        for card in cards:
-                            result += f"• {card.get('name', 'N/A')} (ID: {card.get('id', 'N/A')})\n"
-                            if card.get('desc'):
-                                result += f"  Descrição: {card.get('desc')[:50]}" + ("..." if len(card.get('desc', '')) > 50 else "") + "\n"
-                    else:
-                        result += "  (Nenhum card)\n"
-                else:
-                    result += f"  ❌ Erro ao obter cards: {cards_response.get('error')}\n"
+                if cards_response.status_code != 200:
+                    return f"❌ Erro ao obter cards da lista: {cards_response.status_code}\nResposta: {cards_response.text}"
                 
-                result += "\n"
+                cards = cards_response.json()
                 
-            return result
+                return self._formatar_cards_resultado(cards, lista_nome_exibir)
+                
+            # Se temos um nome de lista, precisamos primeiro encontrar o ID
+            elif lista_nome:
+                # Obtém todas as listas para encontrar a que corresponde ao nome
+                boards_url = "https://api.trello.com/1/members/me/boards"
+                boards_response = requests.get(boards_url, params=auth_params)
+                
+                if boards_response.status_code != 200:
+                    return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
+                
+                boards = boards_response.json()
+                
+                if not boards:
+                    return "❌ Nenhum quadro encontrado para buscar listas."
+                
+                # Busca em todas as listas de todos os quadros
+                for board in boards:
+                    board_id = board.get("id")
+                    lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
+                    lists_response = requests.get(lists_url, params=auth_params)
+                    
+                    if lists_response.status_code != 200:
+                        continue  # Pula para o próximo quadro se houver erro
+                    
+                    lists = lists_response.json()
+                    
+                    # Procura lista pelo nome (case insensitive)
+                    for lst in lists:
+                        if lista_nome.lower() in lst.get("name", "").lower():
+                            lista_id = lst.get("id")
+                            lista_nome_exibir = lst.get("name")
+                            
+                            # Obtém os cards da lista
+                            cards_url = f"https://api.trello.com/1/lists/{lista_id}/cards"
+                            cards_response = requests.get(cards_url, params=auth_params)
+                            
+                            if cards_response.status_code != 200:
+                                return f"❌ Erro ao obter cards da lista: {cards_response.status_code}\nResposta: {cards_response.text}"
+                            
+                            cards = cards_response.json()
+                            
+                            return self._formatar_cards_resultado(cards, lista_nome_exibir)
+                
+                return f"❌ Lista '{lista_nome}' não encontrada. Verifique o nome e tente novamente."
+            
+            # Se não há nome nem ID, pede para especificar
+            else:
+                return "❌ Por favor, especifique o nome ou ID da lista para mostrar os cards."
+                
+        except requests.exceptions.RequestException as e:
+            error_msg = f"❌ Erro ao acessar a API do Trello: {str(e)}"
+            if hasattr(e, 'response') and e.response:
+                error_msg += f"\nResposta: {e.response.text}"
+            logger.exception(error_msg)
+            return error_msg
+        
+        except Exception as e:
+            error_msg = f"❌ Erro inesperado: {str(e)}"
+            logger.exception(error_msg)
+            return error_msg
+    
+    def _formatar_cards_resultado(self, cards: List[Dict], lista_nome: str) -> str:
+        """Formata a resposta com os cards"""
+        if not cards:
+            return f"ℹ️ A lista '{lista_nome}' não possui cards."
+        
+        resposta = f"📋 Cards na lista '{lista_nome}' ({len(cards)} encontrados):\n\n"
+        
+        for i, card in enumerate(cards, 1):
+            nome = card.get("name", "Sem nome")
+            desc = card.get("desc", "")
+            url = card.get("shortUrl", "")
+            
+            resposta += f"{i}. {nome}\n"
+            if url:
+                resposta += f"   URL: {url}\n"
+            if desc:
+                # Limita a descrição a 100 caracteres
+                desc_preview = desc[:100] + "..." if len(desc) > 100 else desc
+                resposta += f"   Descrição: {desc_preview}\n"
+            resposta += "\n"
+        
+        return resposta.strip()
     
     def _comando_criar_lista(self, params: Dict[str, Any]) -> str:
         """Processa o comando para criar uma lista"""
@@ -523,87 +571,156 @@ class TrelloNLProcessor:
     def _comando_criar_card(self, params: Dict[str, Any]) -> str:
         """Processa o comando para criar um card"""
         import requests
+        import os
         
+        # Verifica se temos o nome do card
         nome = params.get('nome')
-        descricao = params.get('descricao', '')
+        if not nome:
+            return "❌ Nome do card não especificado. Por favor, informe o nome do card que deseja criar."
+        
+        # Obtém a lista onde o card será criado
         lista_nome = params.get('lista_nome')
         lista_id = params.get('lista_id')
         
-        if not nome:
-            return "❌ Nome do card não especificado. Por favor, informe o nome do card que deseja criar."
-            
-        # Obtém as credenciais diretamente do ambiente
+        # Obtém as credenciais do Trello
         api_key = os.getenv("TRELLO_API_KEY")
         token = os.getenv("TRELLO_TOKEN")
         
         if not api_key or not token:
             return "❌ Credenciais do Trello não encontradas. Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos."
         
+        # Parâmetros comuns para requisições
+        auth_params = {
+            "key": api_key,
+            "token": token
+        }
+        
         try:
-            # Se temos o nome da lista mas não o ID, precisamos obter o ID
-            if lista_nome and not lista_id:
-                # Lista todas as listas do quadro para encontrar o ID da lista especificada
-                board_id = os.getenv("TRELLO_BOARD_ID")
-                if not board_id:
-                    return "❌ ID do quadro não encontrado. Verifique se TRELLO_BOARD_ID está definido no arquivo .env."
+            # Se não temos o ID da lista, mas temos o nome, precisamos encontrar o ID
+            if not lista_id and lista_nome:
+                # Obtém todos os quadros
+                boards_url = "https://api.trello.com/1/members/me/boards"
+                boards_response = requests.get(boards_url, params=auth_params)
                 
-                listas_params = {
-                    "key": api_key,
-                    "token": token
-                }
+                if boards_response.status_code != 200:
+                    return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
                 
-                # Obtém as listas do quadro
-                listas_response = requests.get(f"https://api.trello.com/1/boards/{board_id}/lists", params=listas_params)
-                listas_response.raise_for_status()
+                boards = boards_response.json()
                 
-                listas_data = listas_response.json()
+                if not boards:
+                    return "❌ Nenhum quadro encontrado. Não é possível criar o card."
                 
-                # Procura a lista pelo nome
-                lista_encontrada = None
-                for lista in listas_data:
-                    if lista_nome.lower() in lista.get('name', '').lower():
-                        lista_encontrada = lista
+                # Busca a lista em todos os quadros
+                for board in boards:
+                    board_id = board.get("id")
+                    lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
+                    lists_response = requests.get(lists_url, params=auth_params)
+                    
+                    if lists_response.status_code != 200:
+                        continue  # Pula para o próximo quadro se houver erro
+                    
+                    lists = lists_response.json()
+                    
+                    # Procura a lista pelo nome (case insensitive)
+                    for lst in lists:
+                        if lista_nome.lower() in lst.get("name", "").lower():
+                            lista_id = lst.get("id")
+                            lista_nome_exibir = lst.get("name")
+                            break
+                    
+                    # Se encontrou a lista, interrompe a busca
+                    if lista_id:
                         break
                 
-                if not lista_encontrada:
+                if not lista_id:
                     return f"❌ Lista '{lista_nome}' não encontrada. Verifique o nome e tente novamente."
-                
-                lista_id = lista_encontrada['id']
-                lista_nome_completo = lista_encontrada['name']
             
-            # Se ainda não temos o ID da lista, não podemos continuar
+            # Se mesmo assim não temos um ID de lista, obtém a primeira lista disponível
             if not lista_id:
-                return "❌ ID ou nome da lista não especificado. Por favor, informe em qual lista o card deve ser criado."
+                # Obtém o primeiro quadro
+                boards_url = "https://api.trello.com/1/members/me/boards"
+                boards_response = requests.get(boards_url, params=auth_params)
                 
-            # Parâmetros para criar o card
-            card_params = {
-                "key": api_key,
-                "token": token,
-                "idList": lista_id,
-                "name": nome,
-                "desc": descricao
-            }
+                if boards_response.status_code != 200:
+                    return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
+                
+                boards = boards_response.json()
+                
+                if not boards:
+                    return "❌ Nenhum quadro encontrado. Não é possível criar o card."
+                
+                # Obtém o primeiro quadro
+                board_id = boards[0].get("id")
+                
+                # Obtém as listas do quadro
+                lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
+                lists_response = requests.get(lists_url, params=auth_params)
+                
+                if lists_response.status_code != 200:
+                    return f"❌ Erro ao obter listas: {lists_response.status_code}\nResposta: {lists_response.text}"
+                
+                lists = lists_response.json()
+                
+                if not lists:
+                    return "❌ Nenhuma lista encontrada no quadro. Não é possível criar o card."
+                
+                lista_id = lists[0].get("id")
+                lista_nome_exibir = lists[0].get("name")
+                
+                return f"⚠️ Nenhuma lista especificada. Para criar o card '{nome}' na lista '{lista_nome_exibir}', por favor confirme com 'sim'."
+            
+            # Verifica se já temos o nome da lista para exibição
+            if not 'lista_nome_exibir' in locals():
+                # Obtém o nome da lista para exibição
+                lista_url = f"https://api.trello.com/1/lists/{lista_id}"
+                lista_response = requests.get(lista_url, params=auth_params)
+                
+                lista_nome_exibir = lista_id
+                if lista_response.status_code == 200:
+                    lista_info = lista_response.json()
+                    lista_nome_exibir = lista_info.get("name", lista_id)
             
             # Cria o card
-            card_response = requests.post("https://api.trello.com/1/cards", params=card_params)
-            card_response.raise_for_status()
+            desc = params.get('descricao', '')
             
-            card_data = card_response.json()
+            card_data = {
+                "name": nome,
+                "idList": lista_id,
+                "desc": desc,
+                "key": api_key,
+                "token": token
+            }
             
-            resultado = f"✅ Card '{nome}' criado com sucesso!\n"
-            resultado += f"ID do card: {card_data['id']}\n"
-            resultado += f"URL do card: {card_data['url']}\n"
+            # Faz a requisição para criar o card
+            card_url = "https://api.trello.com/1/cards"
+            card_response = requests.post(card_url, data=card_data)
             
-            if lista_nome_completo:
-                resultado += f"Na lista: {lista_nome_completo}"
+            if card_response.status_code != 200:
+                return f"❌ Erro ao criar card: {card_response.status_code}\nResposta: {card_response.text}"
             
-            return resultado
+            card = card_response.json()
+            
+            # Formata a resposta de sucesso
+            card_nome = card.get("name")
+            card_url = card.get("shortUrl")
+            
+            resposta = f"✅ Card '{card_nome}' criado com sucesso na lista '{lista_nome_exibir}'!\n"
+            if card_url:
+                resposta += f"URL: {card_url}"
+            
+            return resposta
             
         except requests.exceptions.RequestException as e:
-            erro = f"❌ Erro ao criar card: {str(e)}"
+            error_msg = f"❌ Erro ao acessar a API do Trello: {str(e)}"
             if hasattr(e, 'response') and e.response:
-                erro += f"\nResposta: {e.response.text}"
-            return erro
+                error_msg += f"\nResposta: {e.response.text}"
+            logger.exception(error_msg)
+            return error_msg
+        
+        except Exception as e:
+            error_msg = f"❌ Erro inesperado: {str(e)}"
+            logger.exception(error_msg)
+            return error_msg
     
     def _comando_arquivar_card(self, params: Dict[str, Any]) -> str:
         """Processa o comando para arquivar um card"""
