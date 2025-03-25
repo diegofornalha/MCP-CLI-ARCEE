@@ -38,7 +38,6 @@ class ArceeProvider:
                 "API key não encontrada. Defina ARCEE_API_KEY no .env ou configure com 'arcee configure'."
             )
 
-        print(f"\n🔍 Debug - API Key: {self.api_key[:10]}...")
         self.model = os.getenv("ARCEE_MODEL") or "auto"
 
         # Mensagem do sistema solicitando respostas em português
@@ -100,7 +99,6 @@ class ArceeProvider:
 
             end_time = time.time()
             elapsed_time = end_time - start_time
-            print(f"\n🔍 Debug - Tempo de resposta da API: {elapsed_time:.2f} segundos")
 
             # Processa e retorna a resposta
             return self._process_response(response)
@@ -127,41 +125,12 @@ class ArceeProvider:
             finish_reason = response.choices[0].finish_reason
             model_used = response.model
 
-            # Extrai informações sobre tokens e uso
-            tokens_prompt = (
-                response.usage.prompt_tokens
-                if hasattr(response, "usage")
-                and hasattr(response.usage, "prompt_tokens")
-                else 0
-            )
-            tokens_completion = (
-                response.usage.completion_tokens
-                if hasattr(response, "usage")
-                and hasattr(response.usage, "completion_tokens")
-                else 0
-            )
-            tokens_total = (
-                response.usage.total_tokens
-                if hasattr(response, "usage")
-                and hasattr(response.usage, "total_tokens")
-                else 0
-            )
-
-            # Calcula tamanho da resposta
-            response_length = len(content)
-            response_words = len(content.split())
-
             # Formata a resposta
             processed_response = {
                 "text": content,
                 "finish_reason": finish_reason,
                 "model": model_used,
                 "selected_model": model_used,
-                "tokens_prompt": tokens_prompt,
-                "tokens_completion": tokens_completion,
-                "tokens_total": tokens_total,
-                "response_length": response_length,
-                "response_words": response_words,
                 "raw_response": response,
             }
 
@@ -174,3 +143,37 @@ class ArceeProvider:
                 "error": f"Falha ao processar resposta: {str(e)}",
                 "raw_response": response,
             }
+
+    def chat(self, mensagem: str, historico: List[Dict[str, str]] = None) -> str:
+        """
+        Processa uma mensagem de chat e retorna a resposta
+
+        Args:
+            mensagem: Mensagem do usuário
+            historico: Histórico de mensagens anteriores
+
+        Returns:
+            str: Resposta da IA
+        """
+        try:
+            # Inicializa o histórico se não fornecido
+            if historico is None:
+                historico = []
+
+            # Adiciona a mensagem atual ao histórico
+            mensagens = (
+                [self.system_message]
+                + historico
+                + [{"role": "user", "content": mensagem}]
+            )
+
+            # Gera a resposta
+            resposta = self.generate_content_chat(mensagens)
+
+            if "error" in resposta:
+                return f"❌ Erro: {resposta['error']}"
+
+            return resposta["text"]
+
+        except Exception as e:
+            return f"❌ Erro: {str(e)}"

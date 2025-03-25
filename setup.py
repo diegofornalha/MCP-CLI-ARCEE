@@ -13,7 +13,7 @@ setup(
     name="arcee-cli",
     version="1.0.0",
     author="Arcee AI",
-    author_email="support@arcee.ai",
+    author_email="contato@arcee.ai",
     description="CLI para interagir com a API do Arcee AI",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -32,7 +32,7 @@ setup(
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     install_requires=[
         "requests>=2.25.0",
         "python-dotenv>=0.15.0",
@@ -42,7 +42,11 @@ setup(
         "pytest>=7.0.0",
         "typer>=0.9.0",
         "openai>=1.12.0",
+        "websockets>=10.0",
     ],
+    extras_require={
+        "crew": ["crewai>=0.11.0"],
+    },
     entry_points={
         "console_scripts": [
             "arcee=arcee_cli.__main__:app",
