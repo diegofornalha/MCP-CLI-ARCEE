@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 import os
 import requests
+from datetime import datetime
 
 # Configuração de logging
 logger = logging.getLogger("trello_nl_processor")
@@ -36,6 +37,16 @@ class TrelloNLProcessor:
         
         # Armazena quadros pendentes de exclusão (ID => nome)
         self.quadros_pendentes_exclusao = {}
+        
+        # Cache para armazenar informações temporariamente e reduzir chamadas à API
+        self.cache = {
+            'boards': {'data': None, 'timestamp': 0},
+            'lists': {}, # formato: {'board_id': {'data': [...], 'timestamp': 0}}
+            'cards': {}  # formato: {'list_id': {'data': [...], 'timestamp': 0}}
+        }
+        
+        # Tempo máximo de validade do cache em segundos (5 minutos por padrão)
+        self.cache_ttl = 300
         
         # Padrões para comandos comuns do Trello
         self.comandos_padroes = [
@@ -186,20 +197,56 @@ class TrelloNLProcessor:
                     params['nome'] = match_nome.group(1).strip()
         
         elif tipo_comando == 'criar_card':
-            # Tenta extrair o nome da lista
-            match_lista = re.search(r'(?:na|no|da|do)\s+lista\s+(?:chamada\s+|com\s+nome\s+)?["\']?([^"\']+)["\']?', texto)
-            if match_lista:
-                params['lista_nome'] = match_lista.group(1).strip()
+            # Tenta extrair o nome da lista (mais variações)
+            match_lista = None
+            lista_patterns = [
+                r'(?:na|no|da|do)\s+lista\s+(?:chamada\s+|com\s+nome\s+)?["\']?([^"\']+)["\']?',
+                r'(?:na|no|da|do)\s+lista\s+([A-Za-z0-9]+)',
+                r'lista\s+(?:chamada\s+|com\s+nome\s+)?["\']?([^"\']+)["\']?',
+                r'em\s+["\']?([^"\']+)["\']?'
+            ]
+            
+            for pattern in lista_patterns:
+                match_lista = re.search(pattern, texto)
+                if match_lista:
+                    params['lista_nome'] = match_lista.group(1).strip()
+                    break
                 
-            # Tenta extrair o nome do card
-            match_nome = re.search(r'(?:chamado|com\s+nome|nome|título)\s+["\']?([^"\']+)["\']?', texto)
-            if match_nome:
-                params['nome'] = match_nome.group(1).strip()
+            # Tenta extrair o nome do card (mais variações)
+            match_nome = None
+            nome_patterns = [
+                r'(?:chamado|com\s+nome|nome|título)\s+["\']?([^"\']+)["\']?',
+                r'card\s+["\']?([^"\']+)["\']?',
+                r'cartão\s+["\']?([^"\']+)["\']?',
+                r'tarefa\s+["\']?([^"\']+)["\']?',
+                r'(?:criar|adicionar|novo)\s+(?:um\s+)?(?:card|cartão|tarefa)\s+["\']?([^"\']+)["\']?'
+            ]
+            
+            for pattern in nome_patterns:
+                match_nome = re.search(pattern, texto)
+                if match_nome:
+                    nome_extraido = match_nome.group(1).strip()
+                    # Verifica se o que foi extraído tem "na lista" - se tiver, precisamos extrair só o nome
+                    na_lista_match = re.search(r'(.*?)\s+(?:na|no|da|do)\s+lista', nome_extraido)
+                    if na_lista_match:
+                        nome_extraido = na_lista_match.group(1).strip()
+                    params['nome'] = nome_extraido
+                    break
                 
             # Tenta extrair a descrição
             match_desc = re.search(r'(?:descrição|com\s+descrição)\s+["\']?([^"\']+)["\']?', texto)
             if match_desc:
                 params['descricao'] = match_desc.group(1).strip()
+                
+            # Procura por outros possíveis detalhes
+            match_quadro = re.search(r'(?:quadro|board)\s+(?:chamado\s+|com\s+nome\s+)?["\']?([^"\']+)["\']?', texto)
+            if match_quadro:
+                params['quadro_nome'] = match_quadro.group(1).strip()
+                
+            # Tenta detectar uma possível data de vencimento
+            match_data = re.search(r'(?:vencimento|data|até|prazo)\s+(?:para\s+|de\s+)?["\']?([0-9]{1,2}[-/][0-9]{1,2}(?:[-/][0-9]{2,4})?)["\']?', texto)
+            if match_data:
+                params['data_vencimento'] = match_data.group(1).strip()
         
         elif tipo_comando == 'arquivar_card':
             # Tenta extrair o nome ou ID do card
@@ -310,119 +357,153 @@ class TrelloNLProcessor:
             return f"❌ Erro ao processar comando do Trello: {str(e)}"
     
     def _comando_listar_quadros(self) -> str:
-        """Processa o comando para listar todos os quadros do usuário"""
+        """Processa o comando para listar quadros"""
         import requests
+        import os
         
-        # Obtém as credenciais diretamente do ambiente
+        # Obtém as credenciais do Trello
         api_key = os.getenv("TRELLO_API_KEY")
         token = os.getenv("TRELLO_TOKEN")
         
         if not api_key or not token:
             return "❌ Credenciais do Trello não encontradas. Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos."
+            
+        # Verifica se tem dados em cache
+        quadros = self._get_from_cache('boards')
         
-        try:
-            # Parâmetros da requisição
-            params = {
-                "key": api_key,
-                "token": token,
-                "filter": "open" # Apenas quadros abertos
-            }
-            
-            # Faz a requisição para obter os quadros
-            # Busca os quadros que o usuário tem acesso
-            response = requests.get("https://api.trello.com/1/members/me/boards", params=params)
-            response.raise_for_status()
-            
-            quadros = response.json()
-            
-            if not quadros:
-                return "ℹ️ Nenhum quadro encontrado."
+        if quadros is None:
+            try:
+                # Parâmetros para a requisição
+                params = {
+                    "key": api_key,
+                    "token": token
+                }
                 
-            # Formata os quadros em texto
-            result = "📋 Quadros do Trello:\n\n"
-            
-            for quadro in quadros:
-                nome = quadro.get('name', 'N/A')
-                id_quadro = quadro.get('id', 'N/A')
-                url = quadro.get('shortUrl', 'N/A')
-                desc = quadro.get('desc', '')
+                # Faz a requisição para obter os quadros
+                response = requests.get("https://api.trello.com/1/members/me/boards", params=params)
+                response.raise_for_status()
                 
-                result += f"• {nome}\n"
-                result += f"  ID: {id_quadro}\n"
-                result += f"  URL: {url}\n"
-                if desc:
-                    result += f"  Descrição: {desc}\n"
-                result += "\n"
+                quadros = response.json()
                 
-            return result
+                # Armazena no cache
+                self._store_in_cache('boards', quadros)
+                
+            except requests.exceptions.RequestException as e:
+                erro = f"❌ Erro ao listar quadros: {str(e)}"
+                if hasattr(e, 'response') and e.response:
+                    erro += f"\nResposta: {e.response.text}"
+                return erro
+        
+        # Formata os quadros em texto
+        if not quadros:
+            return "ℹ️ Você não tem nenhum quadro no Trello."
             
-        except requests.exceptions.RequestException as e:
-            erro = f"❌ Erro ao listar quadros: {str(e)}"
-            if hasattr(e, 'response') and e.response:
-                erro += f"\nResposta: {e.response.text}"
-            return erro
+        result = "📋 Seus Quadros no Trello:\n\n"
+        
+        for i, quadro in enumerate(quadros, 1):
+            result += f"{i}. {quadro.get('name', 'N/A')}\n"
+            result += f"   ID: {quadro.get('id', 'N/A')}\n"
+            result += f"   URL: {quadro.get('url', 'N/A')}\n\n"
+            
+        return result.strip()
     
     def _comando_listar_listas(self, params: Optional[Dict[str, Any]] = None) -> str:
         """Processa o comando para listar listas"""
         import requests
+        import os
         
         if params is None:
             params = {}
+            
+        board_id = params.get('board_id')
+        board_url = params.get('board_url')
+        quadro_de_referencia = ""
         
-        # Obtém as credenciais diretamente do ambiente
+        # Obtém as credenciais do Trello
         api_key = os.getenv("TRELLO_API_KEY")
         token = os.getenv("TRELLO_TOKEN")
         
         if not api_key or not token:
             return "❌ Credenciais do Trello não encontradas. Verifique se TRELLO_API_KEY e TRELLO_TOKEN estão definidos."
         
-        # Verifica se foi especificado um ID de quadro no comando
-        board_id = params.get('quadro_id')
-        
-        # Se não foi especificado, usa o valor padrão do .env
+        # Se recebemos uma URL do quadro, extraímos o ID
+        if board_url and not board_id:
+            try:
+                # Extrai o ID do quadro da URL
+                url_parts = board_url.split("/")
+                for i, part in enumerate(url_parts):
+                    if part == "b" and i + 1 < len(url_parts):
+                        board_id = url_parts[i+1].split("/")[0]
+                        break
+                if not board_id:
+                    return f"❌ Não foi possível extrair o ID do quadro da URL: {board_url}"
+                    
+                quadro_de_referencia = f"quadro com URL {board_url}"
+            except Exception as e:
+                return f"❌ Erro ao extrair ID do quadro da URL: {e}"
+                
+        # Se ainda não temos o ID do quadro, usamos o padrão do .env
         if not board_id:
             board_id = os.getenv("TRELLO_BOARD_ID")
             if not board_id:
-                return "❌ ID do quadro não encontrado. Especifique o ID do quadro no comando ou defina TRELLO_BOARD_ID no arquivo .env."
-            
+                return "❌ ID do quadro não encontrado. Especifique um quadro ou configure TRELLO_BOARD_ID no arquivo .env."
             quadro_de_referencia = "quadro padrão"
         else:
-            quadro_de_referencia = f"quadro com ID {board_id}"
+            quadro_de_referencia = f"quadro {board_id}"
         
-        try:
-            # Parâmetros da requisição
-            request_params = {
-                "key": api_key,
-                "token": token
-            }
-            
-            # Faz a requisição para obter as listas
-            response = requests.get(f"https://api.trello.com/1/boards/{board_id}/lists", params=request_params)
-            response.raise_for_status()
-            
-            listas = response.json()
-            
-            if not listas:
-                return f"ℹ️ Nenhuma lista encontrada no {quadro_de_referencia}."
+        # Verifica se tem dados em cache
+        listas = self._get_from_cache('lists', board_id=board_id)
+        
+        # Se não tem no cache, busca da API
+        if listas is None:
+            try:
+                # Parâmetros para a requisição
+                request_params = {
+                    "key": api_key,
+                    "token": token
+                }
                 
-            # Formata as listas em texto
-            result = f"📋 Listas do {quadro_de_referencia}:\n\n"
-            
-            for lista in listas:
-                # Para cada lista, obtém o número de cards
-                cards_response = requests.get(f"https://api.trello.com/1/lists/{lista['id']}/cards", params=request_params)
-                cards_response.raise_for_status()
-                cards = cards_response.json()
+                # Faz a requisição para obter as listas
+                response = requests.get(f"https://api.trello.com/1/boards/{board_id}/lists", params=request_params)
+                response.raise_for_status()
                 
-                result += f"• {lista.get('name', 'N/A')} (ID: {lista.get('id', 'N/A')}) - {len(cards)} cards\n"
+                listas = response.json()
                 
-            return result
+                # Armazena no cache
+                self._store_in_cache('lists', listas, board_id=board_id)
+                
+            except requests.exceptions.RequestException as e:
+                erro = f"❌ Erro ao listar listas: {str(e)}"
+                if hasattr(e, 'response') and e.response:
+                    erro += f"\nResposta: {e.response.text}"
+                return erro
+        
+        if not listas:
+            return f"ℹ️ Nenhuma lista encontrada no {quadro_de_referencia}."
             
-        except requests.exceptions.RequestException as e:
-            erro = f"❌ Erro ao listar listas: {str(e)}"
-            if hasattr(e, 'response') and e.response:
-                erro += f"\nResposta: {e.response.text}"
-            return erro
+        # Formata as listas em texto
+        result = f"📋 Listas do {quadro_de_referencia}:\n\n"
+        
+        for i, lista in enumerate(listas, 1):
+            # Para cada lista, obtém o número de cards (usando cache se disponível)
+            cards = self._get_from_cache('cards', list_id=lista['id'])
+            
+            if cards is None:
+                try:
+                    cards_response = requests.get(f"https://api.trello.com/1/lists/{lista['id']}/cards", 
+                                               params={"key": api_key, "token": token})
+                    cards_response.raise_for_status()
+                    cards = cards_response.json()
+                    
+                    # Armazena no cache
+                    self._store_in_cache('cards', cards, list_id=lista['id'])
+                except:
+                    # Se falhar, apenas continua sem o número de cards
+                    cards = []
+            
+            result += f"{i}. {lista.get('name', 'N/A')} (ID: {lista.get('id', 'N/A')}) - {len(cards)} cards\n"
+            
+        return result
     
     def _comando_listar_cards(self, params: Dict[str, Any]) -> str:
         """Processa o comando para listar cards"""
@@ -581,6 +662,7 @@ class TrelloNLProcessor:
         # Obtém a lista onde o card será criado
         lista_nome = params.get('lista_nome')
         lista_id = params.get('lista_id')
+        quadro_nome = params.get('quadro_nome')
         
         # Obtém as credenciais do Trello
         api_key = os.getenv("TRELLO_API_KEY")
@@ -596,76 +678,150 @@ class TrelloNLProcessor:
         }
         
         try:
+            # Se temos um nome de quadro específico, tentamos encontrá-lo primeiro
+            board_id = None
+            if quadro_nome:
+                # Verifica se temos os quadros em cache
+                quadros = self._get_from_cache('boards')
+                
+                if quadros is None:
+                    # Obtém todos os quadros
+                    boards_response = requests.get("https://api.trello.com/1/members/me/boards", params=auth_params)
+                    
+                    if boards_response.status_code != 200:
+                        return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
+                    
+                    quadros = boards_response.json()
+                    self._store_in_cache('boards', quadros)
+                    
+                # Busca o quadro pelo nome
+                for quadro in quadros:
+                    if quadro_nome.lower() in quadro.get("name", "").lower():
+                        board_id = quadro.get("id")
+                        break
+                
+                if not board_id:
+                    return f"❌ Quadro '{quadro_nome}' não encontrado. Verifique o nome e tente novamente."
+            
             # Se não temos o ID da lista, mas temos o nome, precisamos encontrar o ID
             if not lista_id and lista_nome:
-                # Obtém todos os quadros
-                boards_url = "https://api.trello.com/1/members/me/boards"
-                boards_response = requests.get(boards_url, params=auth_params)
-                
-                if boards_response.status_code != 200:
-                    return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
-                
-                boards = boards_response.json()
-                
-                if not boards:
-                    return "❌ Nenhum quadro encontrado. Não é possível criar o card."
-                
-                # Busca a lista em todos os quadros
-                for board in boards:
-                    board_id = board.get("id")
-                    lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
-                    lists_response = requests.get(lists_url, params=auth_params)
+                # Se já temos um board_id específico, buscamos apenas nele
+                if board_id:
+                    # Verifica se temos as listas deste quadro em cache
+                    listas = self._get_from_cache('lists', board_id=board_id)
                     
-                    if lists_response.status_code != 200:
-                        continue  # Pula para o próximo quadro se houver erro
+                    if listas is None:
+                        # Obtém as listas do quadro
+                        lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
+                        lists_response = requests.get(lists_url, params=auth_params)
+                        
+                        if lists_response.status_code != 200:
+                            return f"❌ Erro ao obter listas: {lists_response.status_code}\nResposta: {lists_response.text}"
+                        
+                        listas = lists_response.json()
+                        self._store_in_cache('lists', listas, board_id=board_id)
                     
-                    lists = lists_response.json()
-                    
-                    # Procura a lista pelo nome (case insensitive)
-                    for lst in lists:
+                    # Procura lista pelo nome (case insensitive)
+                    for lst in listas:
                         if lista_nome.lower() in lst.get("name", "").lower():
                             lista_id = lst.get("id")
                             lista_nome_exibir = lst.get("name")
                             break
                     
-                    # Se encontrou a lista, interrompe a busca
-                    if lista_id:
-                        break
-                
-                if not lista_id:
-                    return f"❌ Lista '{lista_nome}' não encontrada. Verifique o nome e tente novamente."
+                    if not lista_id:
+                        return f"❌ Lista '{lista_nome}' não encontrada no quadro especificado. Verifique o nome e tente novamente."
+                else:
+                    # Se não temos um quadro específico, buscamos em todos os quadros
+                    # Verifica se temos os quadros em cache
+                    quadros = self._get_from_cache('boards')
+                    
+                    if quadros is None:
+                        # Obtém todos os quadros
+                        boards_url = "https://api.trello.com/1/members/me/boards"
+                        boards_response = requests.get(boards_url, params=auth_params)
+                        
+                        if boards_response.status_code != 200:
+                            return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
+                        
+                        quadros = boards_response.json()
+                        self._store_in_cache('boards', quadros)
+                    
+                    if not quadros:
+                        return "❌ Nenhum quadro encontrado. Não é possível criar o card."
+                    
+                    # Busca a lista em todos os quadros
+                    for board in quadros:
+                        board_id = board.get("id")
+                        
+                        # Verifica se temos as listas deste quadro em cache
+                        listas = self._get_from_cache('lists', board_id=board_id)
+                        
+                        if listas is None:
+                            lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
+                            lists_response = requests.get(lists_url, params=auth_params)
+                            
+                            if lists_response.status_code != 200:
+                                continue  # Pula para o próximo quadro se houver erro
+                            
+                            listas = lists_response.json()
+                            self._store_in_cache('lists', listas, board_id=board_id)
+                        
+                        # Procura lista pelo nome (case insensitive)
+                        for lst in listas:
+                            if lista_nome.lower() in lst.get("name", "").lower():
+                                lista_id = lst.get("id")
+                                lista_nome_exibir = lst.get("name")
+                                quadro_nome_encontrado = board.get("name")
+                                break
+                        
+                        # Se encontrou a lista, interrompe a busca
+                        if lista_id:
+                            break
+                    
+                    if not lista_id:
+                        return f"❌ Lista '{lista_nome}' não encontrada. Verifique o nome e tente novamente."
             
             # Se mesmo assim não temos um ID de lista, obtém a primeira lista disponível
             if not lista_id:
-                # Obtém o primeiro quadro
-                boards_url = "https://api.trello.com/1/members/me/boards"
-                boards_response = requests.get(boards_url, params=auth_params)
+                # Verifica se temos os quadros em cache
+                quadros = self._get_from_cache('boards')
                 
-                if boards_response.status_code != 200:
-                    return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
+                if quadros is None:
+                    # Obtém o primeiro quadro
+                    boards_url = "https://api.trello.com/1/members/me/boards"
+                    boards_response = requests.get(boards_url, params=auth_params)
+                    
+                    if boards_response.status_code != 200:
+                        return f"❌ Erro ao obter quadros: {boards_response.status_code}\nResposta: {boards_response.text}"
+                    
+                    quadros = boards_response.json()
+                    self._store_in_cache('boards', quadros)
                 
-                boards = boards_response.json()
-                
-                if not boards:
+                if not quadros:
                     return "❌ Nenhum quadro encontrado. Não é possível criar o card."
                 
                 # Obtém o primeiro quadro
-                board_id = boards[0].get("id")
+                board_id = quadros[0].get("id")
                 
-                # Obtém as listas do quadro
-                lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
-                lists_response = requests.get(lists_url, params=auth_params)
+                # Verifica se temos as listas deste quadro em cache
+                listas = self._get_from_cache('lists', board_id=board_id)
                 
-                if lists_response.status_code != 200:
-                    return f"❌ Erro ao obter listas: {lists_response.status_code}\nResposta: {lists_response.text}"
+                if listas is None:
+                    # Obtém as listas do quadro
+                    lists_url = f"https://api.trello.com/1/boards/{board_id}/lists"
+                    lists_response = requests.get(lists_url, params=auth_params)
+                    
+                    if lists_response.status_code != 200:
+                        return f"❌ Erro ao obter listas: {lists_response.status_code}\nResposta: {lists_response.text}"
+                    
+                    listas = lists_response.json()
+                    self._store_in_cache('lists', listas, board_id=board_id)
                 
-                lists = lists_response.json()
-                
-                if not lists:
+                if not listas:
                     return "❌ Nenhuma lista encontrada no quadro. Não é possível criar o card."
                 
-                lista_id = lists[0].get("id")
-                lista_nome_exibir = lists[0].get("name")
+                lista_id = listas[0].get("id")
+                lista_nome_exibir = listas[0].get("name")
                 
                 return f"⚠️ Nenhuma lista especificada. Para criar o card '{nome}' na lista '{lista_nome_exibir}', por favor confirme com 'sim'."
             
@@ -691,6 +847,37 @@ class TrelloNLProcessor:
                 "token": token
             }
             
+            # Adiciona data de vencimento se fornecida
+            data_vencimento = params.get('data_vencimento')
+            if data_vencimento:
+                try:
+                    # Tenta converter para um formato ISO 8601
+                    # Primeiro identifica o formato da data
+                    if '/' in data_vencimento:
+                        partes = data_vencimento.split('/')
+                    elif '-' in data_vencimento:
+                        partes = data_vencimento.split('-')
+                    else:
+                        raise ValueError("Formato de data não reconhecido")
+                    
+                    # Normaliza para formato yyyy-mm-dd
+                    if len(partes) == 3:
+                        # Se o ano for fornecido com 2 dígitos, adiciona 2000
+                        if len(partes[2]) == 2:
+                            partes[2] = '20' + partes[2]
+                        data_iso = f"{partes[2]}-{partes[1]}-{partes[0]}"
+                    else:  # Se apenas dia e mês, use o ano atual
+                        ano_atual = datetime.now().year
+                        data_iso = f"{ano_atual}-{partes[1]}-{partes[0]}"
+                    
+                    card_data["due"] = data_iso
+                except Exception as e:
+                    return f"❌ Erro ao processar data de vencimento: {str(e)}"
+            
+            # Feedback para o usuário durante o processo
+            processo = f"🔄 Criando card '{nome}' na lista '{lista_nome_exibir}'..."
+            print(processo)
+            
             # Faz a requisição para criar o card
             card_url = "https://api.trello.com/1/cards"
             card_response = requests.post(card_url, data=card_data)
@@ -706,7 +893,12 @@ class TrelloNLProcessor:
             
             resposta = f"✅ Card '{card_nome}' criado com sucesso na lista '{lista_nome_exibir}'!\n"
             if card_url:
-                resposta += f"URL: {card_url}"
+                resposta += f"URL: {card_url}\n"
+                
+            # Se tinha data de vencimento, mostra
+            if 'due' in card and card['due']:
+                data_formatada = card['due'].split('T')[0]  # Remove a parte de hora
+                resposta += f"Data de vencimento: {data_formatada}"
             
             return resposta
             
@@ -1114,4 +1306,90 @@ class TrelloNLProcessor:
         except Exception as e:
             error_msg = f"Erro inesperado durante a busca: {str(e)}"
             logger.exception(error_msg)
-            return error_msg 
+            return error_msg
+    
+    # Métodos para gerenciar o cache
+    def _cache_valido(self, cache_key: str, board_id: Optional[str] = None, list_id: Optional[str] = None) -> bool:
+        """
+        Verifica se o cache para um determinado recurso ainda é válido
+        
+        Args:
+            cache_key: Chave do cache (boards, lists, cards)
+            board_id: ID do quadro (para listas)
+            list_id: ID da lista (para cards)
+            
+        Returns:
+            bool: True se o cache é válido, False caso contrário
+        """
+        import time
+        
+        now = time.time()
+        
+        if cache_key == 'boards':
+            return (self.cache[cache_key]['data'] is not None and 
+                    now - self.cache[cache_key]['timestamp'] < self.cache_ttl)
+        
+        elif cache_key == 'lists' and board_id:
+            return (board_id in self.cache[cache_key] and 
+                    self.cache[cache_key][board_id]['data'] is not None and 
+                    now - self.cache[cache_key][board_id]['timestamp'] < self.cache_ttl)
+        
+        elif cache_key == 'cards' and list_id:
+            return (list_id in self.cache[cache_key] and 
+                    self.cache[cache_key][list_id]['data'] is not None and 
+                    now - self.cache[cache_key][list_id]['timestamp'] < self.cache_ttl)
+        
+        return False
+    
+    def _get_from_cache(self, cache_key: str, board_id: Optional[str] = None, list_id: Optional[str] = None) -> Any:
+        """
+        Obtém dados do cache
+        
+        Args:
+            cache_key: Chave do cache (boards, lists, cards)
+            board_id: ID do quadro (para listas)
+            list_id: ID da lista (para cards)
+            
+        Returns:
+            Dados armazenados no cache ou None se não disponível
+        """
+        if not self._cache_valido(cache_key, board_id, list_id):
+            return None
+        
+        if cache_key == 'boards':
+            return self.cache[cache_key]['data']
+        
+        elif cache_key == 'lists' and board_id:
+            return self.cache[cache_key][board_id]['data']
+        
+        elif cache_key == 'cards' and list_id:
+            return self.cache[cache_key][list_id]['data']
+        
+        return None
+    
+    def _store_in_cache(self, cache_key: str, data: Any, board_id: Optional[str] = None, list_id: Optional[str] = None) -> None:
+        """
+        Armazena dados no cache
+        
+        Args:
+            cache_key: Chave do cache (boards, lists, cards)
+            data: Dados a serem armazenados
+            board_id: ID do quadro (para listas)
+            list_id: ID da lista (para cards)
+        """
+        import time
+        
+        now = time.time()
+        
+        if cache_key == 'boards':
+            self.cache[cache_key] = {'data': data, 'timestamp': now}
+        
+        elif cache_key == 'lists' and board_id:
+            if board_id not in self.cache[cache_key]:
+                self.cache[cache_key][board_id] = {}
+            self.cache[cache_key][board_id] = {'data': data, 'timestamp': now}
+        
+        elif cache_key == 'cards' and list_id:
+            if list_id not in self.cache[cache_key]:
+                self.cache[cache_key][list_id] = {}
+            self.cache[cache_key][list_id] = {'data': data, 'timestamp': now} 
