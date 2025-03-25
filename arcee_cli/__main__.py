@@ -198,7 +198,7 @@ def configure_secrets():
         nova_chave_veyrax = getpass("\nDigite sua chave VeyraX: ")
         if not nova_chave_veyrax:
             print("❌ Chave VeyraX não pode ser vazia")
-            return
+        return
         chave_atual_veyrax = nova_chave_veyrax
 
     # Decide onde salvar

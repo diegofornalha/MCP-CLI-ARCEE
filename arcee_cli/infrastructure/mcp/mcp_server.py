@@ -19,6 +19,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import logging
 import requests
+import websockets
+import asyncio
+import base64
 
 # Configura logging
 logging.basicConfig(level=logging.DEBUG)
@@ -187,34 +190,73 @@ async def tool_call(request: ToolCallRequest) -> Dict[str, Any]:
         # Obtém o contexto da aplicação
         context = app.state.context
 
-        # Faz a requisição direta para a API do VeyraX
-        veyrax_url = "https://server.smithery.ai/@VeyraX/veyrax-mcp/tool_call"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {context['api_key']}",
-            "User-Agent": "Arcee-CLI/1.0",
-        }
+        # Executa o comando VeyraX via CLI
+        import subprocess
+        import json
+        import os
+        import tempfile
 
-        # Monta o payload com base no método
-        payload = {
-            "tool": request.tool,
-            "method": request.method,
-            "parameters": request.parameters or {},
-        }
+        # Cria um arquivo temporário com a configuração
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({"VEYRAX_API_KEY": context["api_key"]}, f)
+            config_file = f.name
 
-        # Faz a requisição
-        response = requests.post(veyrax_url, headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json()
+        try:
+            # Monta o comando VeyraX
+            command = [
+                "npx",
+                "-y",
+                "@smithery/cli@latest",
+                "run",
+                "@VeyraX/veyrax-mcp",
+                "--config-file",
+                config_file,
+                "--",
+                request.method,
+            ]
 
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Erro na requisição: {e}")
-        if hasattr(e, "response") and e.response is not None:
+            # Adiciona parâmetros se houver
+            if request.parameters:
+                command.extend(["--parameters", json.dumps(request.parameters)])
+
+            logger.debug(f"Executando comando: {' '.join(command)}")
+
+            # Executa o comando
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True,
+                env=os.environ.copy(),
+            )
+
+            logger.debug(f"Saída do comando: {result.stdout}")
+            if result.stderr:
+                logger.warning(f"Erro do comando: {result.stderr}")
+
+            # Tenta parsear a saída como JSON
             try:
-                error_data = e.response.json()
-                return {"error": error_data.get("detail", str(e))}
+                output = json.loads(result.stdout)
+                logger.debug(f"Resposta processada: {json.dumps(output, indent=2)}")
+                return output
+            except json.JSONDecodeError as e:
+                logger.error(f"Erro ao decodificar JSON da saída: {e}")
+                logger.error(f"Saída raw: {result.stdout}")
+                return {
+                    "error": "Erro ao processar resposta do VeyraX",
+                    "output": result.stdout,
+                }
+
+        finally:
+            # Remove o arquivo temporário
+            try:
+                os.unlink(config_file)
             except:
-                return {"error": str(e)}
+                pass
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Erro ao executar comando: {e}")
+        logger.error(f"Saída de erro: {e.stderr}")
         return {"error": str(e)}
     except Exception as e:
         logger.error(f"Erro ao executar ferramenta: {e}")
