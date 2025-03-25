@@ -1,0 +1,3 @@
+"""
+Ferramentas utilizadas pelos agentes
+""" 

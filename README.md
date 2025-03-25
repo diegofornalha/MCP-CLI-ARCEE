@@ -24,3 +24,16 @@ pytest
 ```
 python3 -m pip install -e ".[dev]"
 python3 -m venv venv && source venv/bin/activate
+
+pip install -r requirements.txt
+
+mcp dev sample_server.py
+
+npx --yes -p @dylibso/mcpx@latest gen-session
+We need to authenticate you to mcp.run.
+Press [enter] to open the browser and return here after you have logged in.
+Waiting for login completion...........
+Login successful!
+Session: mcpx/diegofornalha/ea3KRo4cV2dkNvxEFza16Wk0KndgNh59.pYn8hHAxyiGDOoC/qosJztjZ7U3/7mfzZPmflJ194zc
+venvagents@AI MCP-CLI-ARCEE % 
+

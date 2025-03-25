@@ -8,14 +8,22 @@ Provedor de serviços do Arcee AI
 import os
 import time
 import json
-from typing import Dict, List, Tuple, Union, Any
+import logging
+from typing import Dict, List, Tuple, Union, Any, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
 from rich import print
 
+from arcee_cli.infrastructure.logging_config import obter_logger, configurar_loggers_bibliotecas
+
 # Carrega variáveis de ambiente
 load_dotenv()
 
+# Configuração do logger
+logger = obter_logger("arcee_provider")
+
+# Garantir que os loggers de bibliotecas estão configurados
+configurar_loggers_bibliotecas()
 
 class ArceeProvider:
     """Provedor de serviços do Arcee AI"""
@@ -47,7 +55,10 @@ class ArceeProvider:
         }
 
         # Configura o cliente OpenAI
-        self.client = OpenAI(api_key=self.api_key, base_url="https://models.arcee.ai/v1")
+        self.client = OpenAI(
+            api_key=self.api_key, 
+            base_url="https://models.arcee.ai/v1",
+        )
 
     def _load_api_key_from_config(self) -> str:
         """Carrega a chave API do arquivo de configuração"""
@@ -60,7 +71,7 @@ class ArceeProvider:
                 config = json.load(f)
                 return config.get("api_key", "")
         except Exception as e:
-            print(f"❌ Erro ao carregar configuração: {str(e)}")
+            logger.error(f"Erro ao carregar configuração: {str(e)}")
             return ""
 
     def health_check(self) -> Tuple[bool, str]:
@@ -71,6 +82,7 @@ class ArceeProvider:
                 return False, "Chave API não configurada"
             return True, "Chave API está configurada"
         except Exception as e:
+            logger.error(f"Erro ao verificar configuração: {str(e)}")
             return False, f"Erro ao verificar configuração: {str(e)}"
 
     def generate_content_chat(
@@ -89,7 +101,8 @@ class ArceeProvider:
                 messages = [self.system_message] + messages
 
             # Faz a requisição usando o cliente OpenAI
-            response = self.client.chat.completions.create(
+            # Aqui usamos "type: ignore" para ignorar o erro de tipo, já que sabemos que a API aceita este formato
+            response = self.client.chat.completions.create(  # type: ignore
                 model=self.model,
                 messages=messages,
                 temperature=0.7,
@@ -97,12 +110,13 @@ class ArceeProvider:
 
             end_time = time.time()
             elapsed_time = end_time - start_time
+            logger.debug(f"Tempo de resposta da API: {elapsed_time:.2f} segundos")
 
             # Processa e retorna a resposta
             return self._process_response(response)
 
         except Exception as e:
-            print(f"❌ Erro na chamada à API da Arcee: {e}")
+            logger.error(f"Erro na chamada à API da Arcee: {e}")
             return {"error": str(e)}
 
     def _process_response(self, response) -> Dict[str, Any]:
@@ -116,9 +130,6 @@ class ArceeProvider:
             Dict[str, Any]: Resposta processada
         """
         try:
-            # Depuração - Mostra a resposta bruta
-            print(f"DEBUG: Resposta bruta recebida: {response}")
-            
             # Extrai o texto da resposta
             content = response.choices[0].message.content
 
@@ -135,24 +146,17 @@ class ArceeProvider:
                 "raw_response": response,
             }
 
-            # Depuração - Mostra a resposta processada
-            print(f"DEBUG: Resposta processada: {processed_response}")
-            
             return processed_response
 
         except Exception as e:
-            print(f"❌ Erro ao processar resposta da Arcee: {e}")
-            print(f"DEBUG: Tipo da resposta: {type(response)}")
-            if hasattr(response, 'choices'):
-                print(f"DEBUG: Choices: {response.choices}")
-            
+            logger.error(f"Erro ao processar resposta da Arcee: {e}")
             return {
                 "text": "",
                 "error": f"Falha ao processar resposta: {str(e)}",
                 "raw_response": response,
             }
 
-    def chat(self, mensagem: str, historico: List[Dict[str, str]] = None) -> str:
+    def chat(self, mensagem: str, historico: Optional[List[Dict[str, str]]] = None) -> str:
         """
         Processa uma mensagem de chat e retorna a resposta
 
@@ -180,4 +184,5 @@ class ArceeProvider:
             return resposta["text"]
 
         except Exception as e:
+            logger.error(f"Erro no processamento do chat: {str(e)}")
             return f"❌ Erro: {str(e)}"
